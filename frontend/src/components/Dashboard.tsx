@@ -2,7 +2,8 @@ import { motion } from 'framer-motion';
 import {
   Activity, AlertTriangle, ArrowRight, BarChart3, Bot, BusFront, Check, ChevronRight, CircleUserRound,
   Clock3, Database, Fingerprint, Gauge, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, MapPin,
-  Menu, Plus, Radar, RefreshCw, Route, ScanLine, Search, ShieldCheck, Sparkles, UserRoundPlus, Users, X,
+  KeyRound, Menu, Plus, Radar, RefreshCw, Route, ScanLine, Search, Send, ShieldCheck, Sparkles,
+  UserRoundPlus, Users, Wifi, WifiOff, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
@@ -37,6 +38,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [panel, setPanel] = useState<'bus' | 'student' | 'timetable' | 'user' | null>(null);
+  const [socketStatus, setSocketStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
 
   const toast = useCallback((text: string, kind: Toast['kind'] = 'success') => {
     const id = Date.now();
@@ -65,6 +67,10 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
   useEffect(() => {
     const socket = io(API_URL, { auth: { token: session.token }, transports: ['websocket', 'polling'] });
     const update = (message: string) => { toast(message, 'live'); void refresh(true); };
+    socket.on('connect', () => setSocketStatus('live'));
+    socket.on('disconnect', () => setSocketStatus('offline'));
+    socket.on('connect_error', () => setSocketStatus('offline'));
+    socket.io.on('reconnect_attempt', () => setSocketStatus('connecting'));
     socket.on('device:event', () => update('New device event received'));
     socket.on('trip:arrived', () => update('Campus arrival verified'));
     socket.on('attendance:synchronized', () => update('Class attendance synchronized'));
@@ -85,7 +91,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
           <span className="side-label">COMMAND</span>
           {nav.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMobileNav(false); }}><Icon size={18} /><span>{label}</span>{id === 'attendance' && analytics?.totals.awaiting_review ? <i>{analytics.totals.awaiting_review}</i> : null}</button>)}
         </nav>
-        <div className="sidebar-system"><div><span className="live-dot" /><strong>Realtime connected</strong></div><p>API and event channel active</p></div>
+        <div className={`sidebar-system connection-${socketStatus}`}><div><span className="live-dot" /><strong>{socketStatus === 'live' ? 'Realtime connected' : socketStatus === 'connecting' ? 'Reconnecting…' : 'Realtime offline'}</strong></div><p>{socketStatus === 'live' ? 'Authenticated socket channel active' : 'REST remains available while socket retries'}</p></div>
         <button className="profile-card" onClick={onLogout}><span><CircleUserRound size={20} /></span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><LogOut size={16} /></button>
       </aside>
 
@@ -93,7 +99,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
         <header className="dash-header">
           <button className="icon-button mobile-only" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
           <div><span className="dash-kicker">OPERATIONS / {tab.toUpperCase()}</span><h1>{nav.find((item) => item.id === tab)?.label}</h1></div>
-          <div className="header-actions"><span className="time-status"><span className="live-dot" /> LIVE</span><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh"><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><div className="header-avatar">{session.user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div></div>
+          <div className="header-actions"><span className={`time-status connection-${socketStatus}`}>{socketStatus === 'live' ? <Wifi size={12}/> : <WifiOff size={12}/>} {socketStatus.toUpperCase()}</span><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh"><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><div className="header-avatar">{session.user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div></div>
         </header>
 
         <div className="dashboard-content">
@@ -101,7 +107,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
           {tab === 'overview' && analytics ? <Overview analytics={analytics} buses={buses} events={events} unresolved={unresolved} onNavigate={setTab} /> : null}
           {tab === 'live' ? <LiveFleet buses={buses} events={events} canOperate={roleCanOperate} onOpenBus={() => setPanel('bus')} onRefresh={() => void refresh(true)} toast={toast} token={session.token} /> : null}
           {tab === 'attendance' ? <AttendanceView rows={attendance} canVerify={roleCanVerify} token={session.token} toast={toast} onRefresh={() => void refresh(true)} /> : null}
-          {tab === 'registry' ? <Registry students={students} timetables={timetables} buses={buses} canManageUsers={session.user.role === 'ADMIN'} onOpen={setPanel} /> : null}
+          {tab === 'registry' ? <Registry students={students} timetables={timetables} buses={buses} canManageUsers={session.user.role === 'ADMIN'} canManageStudents={roleCanOperate} canManageTimetables={roleCanVerify} onOpen={setPanel} /> : null}
           {tab === 'ai' ? <AiAnalysis token={session.token} analytics={analytics} /> : null}
         </div>
       </main>
@@ -150,8 +156,55 @@ function LiveFleet({ buses, events, canOperate, onOpenBus, onRefresh, toast, tok
   return <div className="page-stack">
     <div className="page-title-row"><div><span className="section-kicker">REALTIME TELEMETRY</span><h2>Fleet control</h2><p>Only genuine device packets and authorized operator actions appear here.</p></div>{canOperate && <button className="button button-primary button-compact" onClick={onOpenBus}><Plus size={16}/> Add bus</button>}</div>
     <section className="fleet-grid">{buses.map((bus) => <article className="fleet-card" key={bus.id}><div className="fleet-card-head"><div className="bus-badge"><BusFront size={22}/></div><div><span>{bus.code}</span><strong>{bus.registration_number}</strong></div><Status value={bus.status}/></div><div className="route-line"><span className="route-node"/><i/><span className="route-node campus"/></div><div className="fleet-route"><span>{bus.route_name}</span><strong>Campus</strong></div><div className="fleet-metrics"><div><Users size={16}/><span>Assigned</span><strong>{bus.assigned_students}/{bus.capacity}</strong></div><div><MapPin size={16}/><span>Last position</span><strong>{bus.last_latitude == null ? 'Awaiting GPS' : `${Number(bus.last_latitude).toFixed(4)}, ${Number(bus.last_longitude).toFixed(4)}`}</strong></div></div>{canOperate && <div className="fleet-actions">{bus.active_trip_id ? <button className="button button-ghost button-compact" onClick={() => void arrive(bus.active_trip_id!)}>Confirm campus arrival</button> : <button className="button button-primary button-compact" onClick={() => void startTrip(bus.id)}>Start trip <ArrowRight size={14}/></button>}</div>}</article>)}{!buses.length && <EmptyPanel icon={<BusFront/>} title="No buses configured" text="Add a bus to generate a one-time ESP32 device secret and begin a live trip." action={canOperate ? <button className="button button-primary" onClick={onOpenBus}>Add first bus</button> : undefined}/>}</section>
+    {canOperate ? <DeviceIngestionConsole buses={buses} toast={toast} onAccepted={onRefresh} /> : null}
     <Card title="Device event stream" subtitle={`${events.length} latest accepted packets`}><div className="event-table"><div className="event-table-head"><span>Event</span><span>Identity / coordinate</span><span>Bus</span><span>Received</span><span>State</span></div>{events.map((event) => <div className="event-table-row" key={event.id}><span><i className={`event-type ${event.type === 'GPS' ? 'gps' : ''}`}>{event.type === 'GPS' ? <MapPin size={15}/> : <ScanLine size={15}/>}</i>{pretty(event.type)}</span><span><strong>{event.student_name || (event.latitude != null ? `${Number(event.latitude).toFixed(5)}, ${Number(event.longitude).toFixed(5)}` : event.rfid_uid)}</strong>{event.department ? <small>{event.department} · Y{event.academic_year} · {event.section}</small> : null}</span><span>{event.bus_code}</span><span>{timeAgo(event.received_at)}</span><span>{event.exception_type ? <Status value={event.exception_type}/> : <Status value="VALID"/>}</span></div>)}{!events.length && <Empty label="The event rail is listening" />}</div></Card>
   </div>;
+}
+
+function DeviceIngestionConsole({ buses, toast, onAccepted }: { buses: Bus[]; toast: (s: string, k?: Toast['kind']) => void; onAccepted: () => void }) {
+  const [kind, setKind] = useState<'RFID_SCAN' | 'GPS'>('RFID_SCAN');
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const deviceKey = String(data.get('deviceKey') ?? '').trim();
+    const busCode = String(data.get('busCode') ?? '').trim();
+    const rfidUid = String(data.get('rfidUid') ?? '').trim();
+    const latitude = Number(data.get('latitude'));
+    const longitude = Number(data.get('longitude'));
+    setBusy(true);
+    try {
+      const payload = {
+        busCode,
+        eventId: `web-${crypto.randomUUID()}`,
+        type: kind,
+        deviceTimestamp: new Date().toISOString(),
+        ...(kind === 'RFID_SCAN' ? { rfidUid } : { latitude, longitude }),
+      };
+      const result = await api<{ accepted: boolean; duplicate: boolean; exceptionType: string | null }>(
+        '/api/device/events',
+        { method: 'POST', headers: { 'X-Device-Key': deviceKey }, body: JSON.stringify(payload) },
+      );
+      toast(result.exceptionType ? `Packet accepted with ${pretty(result.exceptionType)}` : `${pretty(kind)} packet accepted`, result.exceptionType ? 'error' : 'live');
+      onAccepted();
+      if (kind === 'RFID_SCAN') (form.elements.namedItem('rfidUid') as HTMLInputElement | null)?.focus();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Device packet rejected', 'error');
+    } finally { setBusy(false); }
+  };
+
+  return <section className="ingestion-console">
+    <div className="ingestion-head"><div><span className="section-kicker">PRODUCTION INGESTION PORT</span><h3>Send a real hardware packet</h3><p>This form calls the exact endpoint used by the ESP32. The packet is authenticated, validated, persisted in Neon, and broadcast over Socket.IO—nothing here is mocked.</p></div><span><KeyRound size={13}/> KEY STAYS IN MEMORY</span></div>
+    <form className="ingestion-form" onSubmit={submit}>
+      <label>Packet type<select value={kind} onChange={(event) => setKind(event.target.value as 'RFID_SCAN' | 'GPS')}><option value="RFID_SCAN">RFID scan</option><option value="GPS">GPS position</option></select></label>
+      <label>Device key<input name="deviceKey" type="password" required autoComplete="off" placeholder="One-time bus secret" /></label>
+      <label>Bus<select name="busCode" required defaultValue=""><option value="" disabled>Select an active bus</option>{buses.map((bus) => <option key={bus.id} value={bus.code}>{bus.code} · {bus.route_name}</option>)}</select></label>
+      {kind === 'RFID_SCAN' ? <label>RFID UID<input name="rfidUid" required minLength={4} placeholder="04A1B2C3D4" /></label> : <><label>Latitude<input name="latitude" required type="number" step="any" min="-90" max="90" placeholder="9.5747" /></label><label>Longitude<input name="longitude" required type="number" step="any" min="-180" max="180" placeholder="77.6792" /></label></>}
+      <button className="button button-primary" disabled={busy || !buses.some((bus) => bus.active_trip_id)}>{busy ? <LoaderCircle className="spin" size={16}/> : <Send size={15}/>} Send packet</button>
+    </form>
+    <p className="ingestion-note"><ShieldCheck size={13}/> Start a trip first. Device secrets are never saved by this browser form or returned by the API.</p>
+  </section>;
 }
 
 function AttendanceView({ rows, canVerify, token, toast, onRefresh }: { rows: Attendance[]; canVerify: boolean; token: string; toast: (s:string,k?:Toast['kind'])=>void; onRefresh:()=>void }) {
@@ -161,8 +214,8 @@ function AttendanceView({ rows, canVerify, token, toast, onRefresh }: { rows: At
   return <div className="page-stack"><div className="page-title-row"><div><span className="section-kicker">FACULTY-IN-THE-LOOP</span><h2>Academic attendance</h2><p>Provisional rows originated from a verified trip and remain human-reviewable.</p></div></div><div className="table-toolbar"><div className="search-box"><Search size={16}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search student, class, subject…"/></div><div className="filter-pills">{['ALL','PROVISIONAL','PRESENT','ABSENT','EXCUSED'].map((v)=><button className={filter===v?'active':''} key={v} onClick={()=>setFilter(v)}>{pretty(v)}</button>)}</div></div><div className="data-table attendance-table"><div className="data-table-head"><span>Student</span><span>Class</span><span>Session</span><span>Evidence</span><span>Status</span><span>Faculty action</span></div>{filtered.map((row)=><div className="data-table-row" key={row.id}><span><span className="mini-avatar">{initials(row.student_name)}</span><span><strong>{row.student_name}</strong><small>{row.registration_number}</small></span></span><span><strong>{row.department}</strong><small>Year {row.academic_year} · Section {row.section}</small></span><span><strong>{row.subject_code}</strong><small>{row.subject_name}</small></span><span><strong>{row.bus_code || 'Bus event'}</strong><small>{new Date(row.session_date).toLocaleDateString()}</small></span><span><Status value={row.status}/></span><span>{canVerify && row.status==='PROVISIONAL'?<div className="row-actions"><button onClick={()=>void verify(row.id,'PRESENT')} title="Present"><Check size={15}/></button><button onClick={()=>void verify(row.id,'ABSENT')} title="Absent"><X size={15}/></button></div>:<small>{row.verified_by_name ? `Verified by ${row.verified_by_name}` : '—'}</small>}</span></div>)}{!filtered.length&&<Empty label={rows.length?'No records match this filter':'No attendance generated yet'}/>}</div></div>;
 }
 
-function Registry({ students, timetables, buses, canManageUsers, onOpen }: { students: Student[]; timetables: Timetable[]; buses: Bus[]; canManageUsers: boolean; onOpen:(p:'student'|'timetable'|'user')=>void }) {
-  return <div className="page-stack"><div className="page-title-row"><div><span className="section-kicker">ACADEMIC MAPPING</span><h2>Identity registry</h2><p>The mappings that transform a UID into the right class record.</p></div><div className="split-actions">{canManageUsers&&<button className="button button-ghost button-compact" onClick={()=>onOpen('user')}><Users size={16}/> Add user</button>}<button className="button button-ghost button-compact" onClick={()=>onOpen('timetable')}><Clock3 size={16}/> Add timetable</button><button className="button button-primary button-compact" onClick={()=>onOpen('student')}><UserRoundPlus size={16}/> Add student</button></div></div><section className="registry-summary"><div><Fingerprint/><span>RFID identities</span><strong>{students.length}</strong></div><div><BusFront/><span>Assigned to a bus</span><strong>{students.filter(s=>s.assigned_bus_id).length}</strong></div><div><Clock3/><span>Timetable sessions</span><strong>{timetables.length}</strong></div><div><Route/><span>Available buses</span><strong>{buses.length}</strong></div></section><div className="registry-grid"><Card title="Students" subtitle="Live database records"><div className="compact-list">{students.slice(0,12).map((s)=><div key={s.id}><span className="mini-avatar">{initials(s.name)}</span><span><strong>{s.name}</strong><small>{s.registration_number} · {s.rfid_uid}</small></span><span><strong>{s.department} Y{s.academic_year}-{s.section}</strong><small>{s.assigned_bus_code || 'No bus assigned'}</small></span></div>)}{!students.length&&<Empty label="No student identities registered"/>}</div></Card><Card title="Timetable" subtitle="Arrival-to-class resolution"><div className="compact-list timetable-list">{timetables.slice(0,12).map((t)=><div key={t.id}><span className="day-badge">{['SU','MO','TU','WE','TH','FR','SA'][t.weekday]}</span><span><strong>{t.subject_code} · {t.subject_name}</strong><small>{t.starts_at.slice(0,5)}–{t.ends_at.slice(0,5)}</small></span><span><strong>{t.department} Y{t.academic_year}-{t.section}</strong><small>{t.faculty_name || 'Current faculty'}</small></span></div>)}{!timetables.length&&<Empty label="Add a timetable before processing an arrival"/>}</div></Card></div></div>;
+function Registry({ students, timetables, buses, canManageUsers, canManageStudents, canManageTimetables, onOpen }: { students: Student[]; timetables: Timetable[]; buses: Bus[]; canManageUsers: boolean; canManageStudents: boolean; canManageTimetables: boolean; onOpen:(p:'student'|'timetable'|'user')=>void }) {
+  return <div className="page-stack"><div className="page-title-row"><div><span className="section-kicker">ACADEMIC MAPPING</span><h2>Identity registry</h2><p>The mappings that transform a UID into the right class record.</p></div><div className="split-actions">{canManageUsers&&<button className="button button-ghost button-compact" onClick={()=>onOpen('user')}><Users size={16}/> Add user</button>}{canManageTimetables&&<button className="button button-ghost button-compact" onClick={()=>onOpen('timetable')}><Clock3 size={16}/> Add timetable</button>}{canManageStudents&&<button className="button button-primary button-compact" onClick={()=>onOpen('student')}><UserRoundPlus size={16}/> Add student</button>}</div></div><section className="registry-summary"><div><Fingerprint/><span>RFID identities</span><strong>{students.length}</strong></div><div><BusFront/><span>Assigned to a bus</span><strong>{students.filter(s=>s.assigned_bus_id).length}</strong></div><div><Clock3/><span>Timetable sessions</span><strong>{timetables.length}</strong></div><div><Route/><span>Available buses</span><strong>{buses.length}</strong></div></section><div className="registry-grid"><Card title="Students" subtitle="Live database records"><div className="compact-list">{students.slice(0,12).map((s)=><div key={s.id}><span className="mini-avatar">{initials(s.name)}</span><span><strong>{s.name}</strong><small>{s.registration_number} · {s.rfid_uid}</small></span><span><strong>{s.department} Y{s.academic_year}-{s.section}</strong><small>{s.assigned_bus_code || 'No bus assigned'}</small></span></div>)}{!students.length&&<Empty label="No student identities registered"/>}</div></Card><Card title="Timetable" subtitle="Arrival-to-class resolution"><div className="compact-list timetable-list">{timetables.slice(0,12).map((t)=><div key={t.id}><span className="day-badge">{['SU','MO','TU','WE','TH','FR','SA'][t.weekday]}</span><span><strong>{t.subject_code} · {t.subject_name}</strong><small>{t.starts_at.slice(0,5)}–{t.ends_at.slice(0,5)}</small></span><span><strong>{t.department} Y{t.academic_year}-{t.section}</strong><small>{t.faculty_name || 'Current faculty'}</small></span></div>)}{!timetables.length&&<Empty label="Add a timetable before processing an arrival"/>}</div></Card></div></div>;
 }
 
 function AiAnalysis({ token, analytics }: { token: string; analytics: Analytics | null }) {

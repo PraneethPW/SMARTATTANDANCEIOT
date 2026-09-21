@@ -103,6 +103,51 @@ app.post('/api/auth/bootstrap', asyncRoute(async (req, res) => {
   }
 }));
 
+app.post('/api/auth/signup', asyncRoute(async (req, res) => {
+  const input = credentialsSchema.extend({ role: z.enum(['FACULTY', 'TRANSPORT']) }).parse(req.body);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const initialized = await client.query('SELECT 1 FROM users LIMIT 1');
+    if (!initialized.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Initialize the workspace administrator before creating member accounts' });
+    }
+
+    const existing = await client.query<{
+      id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT'; password_hash: string;
+    }>('SELECT id, name, email, role, password_hash FROM users WHERE email = $1', [input.email]);
+    const found = existing.rows[0];
+    if (found) {
+      await client.query('ROLLBACK');
+      if (found.role === input.role && await bcrypt.compare(input.password, found.password_hash)) {
+        const user = { id: found.id, name: found.name, email: found.email, role: found.role };
+        return res.json({ token: signSession(user), user, recovered: true });
+      }
+      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+    }
+
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const created = await client.query<{
+      id: string; name: string; email: string; role: 'FACULTY' | 'TRANSPORT';
+    }>(`
+      INSERT INTO users (name, email, password_hash, role)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, name, email, role
+    `, [input.name, input.email, passwordHash, input.role]);
+    const user = created.rows[0]!;
+    await client.query(`INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, after_value)
+      VALUES ($1::uuid,'SELF_REGISTER_USER','user',$1::text,$2::jsonb)`, [user.id, JSON.stringify(user)]);
+    await client.query('COMMIT');
+    res.status(201).json({ token: signSession(user), user });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}));
+
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const input = z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1) }).parse(req.body);
   const result = await pool.query<{

@@ -7,7 +7,7 @@ type Props = { open: boolean; onClose: () => void; onAuthenticated: (session: Se
 
 export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
   const [initialized, setInitialized] = useState<boolean | null>(null);
-  const [mode, setMode] = useState<'login' | 'bootstrap'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'bootstrap'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -25,11 +25,14 @@ export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
     const data = new FormData(event.currentTarget);
     const payload = {
       name: String(data.get('name') || ''), email: String(data.get('email') || ''), password: String(data.get('password') || ''),
+      role: String(data.get('role') || 'FACULTY'),
     };
     try {
       const session = mode === 'bootstrap'
         ? await api<Session>('/api/auth/bootstrap', { method: 'POST', body: JSON.stringify(payload) })
-        : await api<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: payload.email, password: payload.password }) });
+        : mode === 'signup'
+          ? await api<Session>('/api/auth/signup', { method: 'POST', body: JSON.stringify(payload) })
+          : await api<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: payload.email, password: payload.password }) });
       localStorage.setItem('transitsync-session', JSON.stringify(session));
       onAuthenticated(session);
     } catch (err) { setError(err instanceof Error ? err.message : 'Authentication failed'); }
@@ -51,16 +54,18 @@ export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
             <div className="auth-form-panel">
               <button className="back-link" onClick={onClose}><ArrowLeft size={15} /> Back to experience</button>
               <div className="auth-heading">
-                <span>{mode === 'bootstrap' ? 'FIRST-RUN SETUP' : 'CONTROL CENTER'}</span>
-                <h3>{mode === 'bootstrap' ? 'Initialize workspace' : 'Welcome back'}</h3>
-                <p>{mode === 'bootstrap' ? 'Create the first administrator. Setup closes automatically afterward.' : 'Sign in with your institutional account.'}</p>
+                <span>{mode === 'bootstrap' ? 'FIRST-RUN SETUP' : mode === 'signup' ? 'JOIN THE LIVE OPERATION' : 'CONTROL CENTER'}</span>
+                <h3>{mode === 'bootstrap' ? 'Initialize workspace' : mode === 'signup' ? 'Create your account' : 'Welcome back'}</h3>
+                <p>{mode === 'bootstrap' ? 'Create the first administrator. Setup closes automatically afterward.' : mode === 'signup' ? 'Register as faculty or transport staff. Administrator access remains invite-only.' : 'Sign in with your institutional account.'}</p>
               </div>
               <form onSubmit={submit}>
-                {mode === 'bootstrap' && <label>Administrator name<input name="name" required minLength={2} placeholder="Your full name" /></label>}
+                {(mode === 'bootstrap' || mode === 'signup') && <label>{mode === 'bootstrap' ? 'Administrator name' : 'Full name'}<input name="name" required minLength={2} placeholder="Your full name" autoComplete="name" /></label>}
                 <label>Email address<input name="email" type="email" required placeholder="admin@college.edu" /></label>
-                <label>Password<div className="password-field"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={mode === 'bootstrap' ? 10 : 1} placeholder="••••••••••" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
+                {mode === 'signup' && <label>Account type<select name="role" defaultValue="FACULTY"><option value="FACULTY">Faculty member</option><option value="TRANSPORT">Transport operator</option></select></label>}
+                <label>Password<div className="password-field"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={mode === 'login' ? 1 : 10} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="••••••••••" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
                 {error && <div className="form-error">{error}</div>}
-                <button className="button button-primary auth-submit" disabled={busy || initialized === null}>{busy ? <LoaderCircle className="spin" size={18} /> : null}{mode === 'bootstrap' ? 'Create secure workspace' : 'Enter control center'}</button>
+                <button className="button button-primary auth-submit" disabled={busy || initialized === null}>{busy ? <LoaderCircle className="spin" size={18} /> : null}{mode === 'bootstrap' ? 'Create secure workspace' : mode === 'signup' ? 'Create account & continue' : 'Enter control center'}</button>
+                {initialized && mode !== 'bootstrap' && <div className="auth-switch"><span>{mode === 'login' ? 'New to TransitSync?' : 'Already have an account?'}</span><button type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Sign in instead'}</button></div>}
               </form>
             </div>
           </motion.div>
@@ -69,4 +74,3 @@ export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
     </AnimatePresence>
   );
 }
-
