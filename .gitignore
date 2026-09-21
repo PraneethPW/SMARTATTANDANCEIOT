@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# builds and coverage
+dist/
+frontend/dist/
+backend/dist/
+coverage/
+*.tsbuildinfo
+
+# environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# logs and local tooling
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.vercel/
+.railway/
+
+# temporary exports
+tmp/
+uploads/
