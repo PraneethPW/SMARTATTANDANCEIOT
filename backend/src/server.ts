@@ -17,6 +17,7 @@ import {
   isDwellSatisfied,
   normalizeRfid,
 } from './domain.js';
+import { matchesParentClaim, matchesStudentClaim } from './registration.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -76,6 +77,11 @@ const credentialsSchema = z.object({
   password: z.string().min(10).max(128),
 });
 
+app.get('/api/registration/buses', asyncRoute(async (_req, res) => {
+  const result = await pool.query('SELECT code, route_name FROM buses ORDER BY code');
+  res.json({ buses: result.rows });
+}));
+
 app.post('/api/auth/bootstrap', asyncRoute(async (req, res) => {
   const input = credentialsSchema.parse(req.body);
   const client = await pool.connect();
@@ -104,49 +110,101 @@ app.post('/api/auth/bootstrap', asyncRoute(async (req, res) => {
   }
 }));
 
-app.post('/api/auth/signup', asyncRoute(async (req, res) => {
-  const input = credentialsSchema.extend({ role: z.enum(['FACULTY', 'TRANSPORT']) }).parse(req.body);
+app.post('/api/auth/signup', (_req, res) => {
+  res.status(403).json({ error: 'Faculty and transport accounts are created by a campus administrator' });
+});
+
+app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
+  const input = credentialsSchema.extend({
+    registrationNumber: z.string().trim().min(2).max(40),
+    rfidUid: z.string().trim().min(4).max(64).refine((value) => normalizeRfid(value).length >= 4),
+    department: z.string().trim().min(2).max(50),
+    academicYear: z.coerce.number().int().min(1).max(8),
+    section: z.string().trim().min(1).max(12),
+    busCode: z.string().trim().min(2).max(20),
+    parentName: z.string().trim().max(100).optional(),
+    parentContact: z.string().trim().max(40).optional(),
+  }).parse(req.body);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const initialized = await client.query('SELECT 1 FROM users LIMIT 1');
-    if (!initialized.rowCount) {
+    const bus = await client.query<{ id: string }>('SELECT id FROM buses WHERE code=$1', [input.busCode.toUpperCase()]);
+    if (!bus.rows[0]) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Initialize the workspace administrator before creating member accounts' });
+      return res.status(400).json({ error: 'Select a registered campus bus' });
     }
-
+    const rfidUid = normalizeRfid(input.rfidUid);
     const existing = await client.query<{
-      id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT'; password_hash: string;
-    }>('SELECT id, name, email, role, password_hash FROM users WHERE email = $1', [input.email]);
-    const found = existing.rows[0];
-    if (found) {
-      await client.query('ROLLBACK');
-      if (found.role === input.role && await bcrypt.compare(input.password, found.password_hash)) {
-        const user = { id: found.id, name: found.name, email: found.email, role: found.role };
-        return res.json({ token: signSession(user), user, recovered: true });
+      id: string; name: string; rfid_uid: string; department: string; academic_year: number;
+      section: string; assigned_bus_id: string | null; active: boolean;
+    }>('SELECT id, name, rfid_uid, department, academic_year, section, assigned_bus_id, active FROM students WHERE registration_number=$1 FOR UPDATE', [input.registrationNumber]);
+    let studentId = existing.rows[0]?.id;
+    if (existing.rows[0]) {
+      const student = existing.rows[0];
+      if (!matchesStudentClaim(student, input, bus.rows[0].id)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Registration details do not match the campus record. Contact your administrator.' });
       }
-      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+      const linked = await client.query("SELECT 1 FROM student_user_links WHERE student_id=$1 AND relationship='SELF' LIMIT 1", [studentId]);
+      if (linked.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'This student already has an account. Sign in or contact your administrator.' });
+      }
+      if (!student.assigned_bus_id) await client.query('UPDATE students SET assigned_bus_id=$1 WHERE id=$2', [bus.rows[0].id, studentId]);
+    } else {
+      const created = await client.query<{ id: string }>(`INSERT INTO students
+        (registration_number, rfid_uid, name, department, academic_year, section, parent_name, parent_contact, assigned_bus_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [input.registrationNumber, rfidUid, input.name, input.department.toUpperCase(), input.academicYear,
+        input.section.toUpperCase(), input.parentName || null, input.parentContact || null, bus.rows[0].id]);
+      studentId = created.rows[0]!.id;
     }
-
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const created = await client.query<{
-      id: string; name: string; email: string; role: 'FACULTY' | 'TRANSPORT';
-    }>(`
-      INSERT INTO users (name, email, password_hash, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, name, email, role
-    `, [input.name, input.email, passwordHash, input.role]);
+    const created = await client.query<{ id: string; name: string; email: string; role: 'STUDENT' }>(
+      "INSERT INTO users (name,email,password_hash,role) VALUES ($1,$2,$3,'STUDENT') RETURNING id,name,email,role",
+      [input.name, input.email, passwordHash]);
     const user = created.rows[0]!;
-    await client.query(`INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, after_value)
-      VALUES ($1::uuid,'SELF_REGISTER_USER','user',$1::text,$2::jsonb)`, [user.id, JSON.stringify(user)]);
+    await client.query("INSERT INTO student_user_links (user_id,student_id,relationship) VALUES ($1,$2,'SELF')", [user.id, studentId]);
+    await client.query(`INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,after_value)
+      VALUES ($1,'SELF_REGISTER_STUDENT','student',$2,$3)`, [user.id, studentId, JSON.stringify({ registrationNumber: input.registrationNumber, busCode: input.busCode })]);
     await client.query('COMMIT');
+    io.to('operations').emit('student:created', { studentId });
+    io.to('operations').emit('user:created', { role: 'STUDENT' });
+    io.to('portal').emit('portal:changed');
     res.status(201).json({ token: signSession(user), user });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}));
+
+app.post('/api/auth/parent-signup', asyncRoute(async (req, res) => {
+  const input = credentialsSchema.extend({
+    registrationNumber: z.string().trim().min(2).max(40),
+    parentContact: z.string().trim().min(6).max(40),
+  }).parse(req.body);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query<{ id: string; parent_name: string | null; parent_contact: string | null }>(
+      'SELECT id,parent_name,parent_contact FROM students WHERE registration_number=$1 AND active=true FOR UPDATE', [input.registrationNumber]);
+    const student = found.rows[0];
+    if (!student || !matchesParentClaim(student, input)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Parent details do not match the student record. Contact your administrator.' });
+    }
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const created = await client.query<{ id: string; name: string; email: string; role: 'PARENT' }>(
+      "INSERT INTO users (name,email,password_hash,role) VALUES ($1,$2,$3,'PARENT') RETURNING id,name,email,role",
+      [input.name, input.email, passwordHash]);
+    const user = created.rows[0]!;
+    await client.query("INSERT INTO student_user_links (user_id,student_id,relationship) VALUES ($1,$2,'PARENT')", [user.id, student.id]);
+    await client.query(`INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,after_value)
+      VALUES ($1,'SELF_REGISTER_PARENT','user',$2,$3)`, [user.id, user.id, JSON.stringify({ registrationNumber: input.registrationNumber })]);
+    await client.query('COMMIT');
+    io.to('operations').emit('user:created', { role: 'PARENT' });
+    io.to('portal').emit('portal:changed');
+    res.status(201).json({ token: signSession(user), user });
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
 }));
 
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
@@ -190,6 +248,7 @@ app.post('/api/users', requireAuth, allowRoles('ADMIN'), asyncRoute(async (req, 
     await client.query(`INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, after_value)
       VALUES ($1,'CREATE_USER','user',$2,$3)`, [req.user!.id, result.rows[0].id, JSON.stringify({ ...result.rows[0], registrationNumber: input.registrationNumber })]);
     await client.query('COMMIT');
+    io.to('operations').emit('user:created', { role: input.role });
     res.status(201).json({ user: result.rows[0] });
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
@@ -207,15 +266,42 @@ app.post('/api/users/:userId/students', requireAuth, allowRoles('ADMIN'), asyncR
   res.status(201).json({ studentId: result.rows[0].student_id });
 }));
 
+app.post('/api/portal/link-child', requireAuth, allowRoles('PARENT'), asyncRoute(async (req, res) => {
+  const input = z.object({
+    registrationNumber: z.string().trim().min(2).max(40),
+    parentContact: z.string().trim().min(6).max(40),
+  }).parse(req.body);
+  const found = await pool.query<{ id: string; parent_name: string | null; parent_contact: string | null }>(
+    'SELECT id,parent_name,parent_contact FROM students WHERE registration_number=$1 AND active=true', [input.registrationNumber]);
+  const student = found.rows[0];
+  if (!student || !matchesParentClaim(student, { name: req.user!.name, parentContact: input.parentContact })) {
+    return res.status(409).json({ error: 'Parent details do not match the student record. Contact your administrator.' });
+  }
+  const linked = await pool.query(`INSERT INTO student_user_links (user_id,student_id,relationship)
+    VALUES ($1,$2,'PARENT') ON CONFLICT DO NOTHING RETURNING student_id`, [req.user!.id, student.id]);
+  if (!linked.rowCount) return res.status(409).json({ error: 'This child is already linked to your account' });
+  await pool.query(`INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,after_value)
+    VALUES ($1,'SELF_LINK_CHILD','student',$2,$3)`, [req.user!.id, student.id, JSON.stringify({ registrationNumber: input.registrationNumber })]);
+  io.to('portal').emit('portal:changed');
+  res.status(201).json({ studentId: student.id });
+}));
+
 app.get('/api/portal', requireAuth, allowRoles('STUDENT', 'PARENT'), asyncRoute(async (req, res) => {
   const userId = req.user!.id;
   const students = await pool.query(`SELECT s.id, s.name, s.registration_number, s.department, s.academic_year, s.section,
       s.assigned_bus_id, b.code AS bus_code, b.route_name, b.driver_name, b.status AS bus_status,
-      b.last_seen_at, b.last_latitude, b.last_longitude, l.relationship
+      b.last_seen_at, b.last_latitude, b.last_longitude, l.relationship,
+      t.status AS trip_status, t.started_at AS trip_started_at, t.arrived_at AS trip_arrived_at,
+      boarding.received_at AS boarded_at
     FROM student_user_links l JOIN students s ON s.id=l.student_id
     LEFT JOIN buses b ON b.id=s.assigned_bus_id
+    LEFT JOIN LATERAL (SELECT id,status,started_at,arrived_at FROM trips
+      WHERE bus_id=b.id ORDER BY started_at DESC LIMIT 1) t ON true
+    LEFT JOIN LATERAL (SELECT received_at FROM device_events
+      WHERE trip_id=t.id AND student_id=s.id AND type='RFID_SCAN' AND exception_type IS NULL
+      ORDER BY received_at DESC LIMIT 1) boarding ON true
     WHERE l.user_id=$1 AND s.active=true ORDER BY s.name`, [userId]);
-  const [attendance, scans, timetable] = await Promise.all([
+  const [attendance, scans, timetable, buses] = await Promise.all([
     pool.query(`SELECT ar.id, ar.student_id, ar.status, ar.source, ar.created_at, ar.verified_at,
         ats.session_date, ats.subject_code, ats.subject_name, b.code AS bus_code
       FROM attendance_records ar JOIN student_user_links l ON l.student_id=ar.student_id AND l.user_id=$1
@@ -231,8 +317,28 @@ app.get('/api/portal', requireAuth, allowRoles('STUDENT', 'PARENT'), asyncRoute(
       FROM student_user_links l JOIN students s ON s.id=l.student_id
       JOIN timetables t ON t.department=s.department AND t.academic_year=s.academic_year AND t.section=s.section
       WHERE l.user_id=$1 ORDER BY t.weekday, t.starts_at`, [userId]),
+    pool.query(`SELECT b.id,b.code,b.route_name,b.status,
+        t.started_at AS trip_started_at,t.arrived_at AS trip_arrived_at
+      FROM buses b LEFT JOIN LATERAL (SELECT started_at,arrived_at FROM trips
+        WHERE bus_id=b.id ORDER BY started_at DESC LIMIT 1) t ON true
+      ORDER BY b.code`),
   ]);
-  res.json({ students: students.rows, attendance: attendance.rows, scans: scans.rows, timetable: timetable.rows });
+  res.json({ students: students.rows, attendance: attendance.rows, scans: scans.rows, timetable: timetable.rows, buses: buses.rows });
+}));
+
+app.get('/api/boarding', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'), asyncRoute(async (_req, res) => {
+  const result = await pool.query(`SELECT s.id, s.name, s.registration_number, s.department, s.academic_year, s.section,
+      b.code AS bus_code, b.route_name, b.status AS bus_status,
+      t.id AS trip_id, t.status AS trip_status, t.started_at AS trip_started_at, t.arrived_at AS trip_arrived_at,
+      boarding.received_at AS boarded_at
+    FROM students s LEFT JOIN buses b ON b.id=s.assigned_bus_id
+    LEFT JOIN LATERAL (SELECT id,status,started_at,arrived_at FROM trips
+      WHERE bus_id=b.id ORDER BY started_at DESC LIMIT 1) t ON true
+    LEFT JOIN LATERAL (SELECT received_at FROM device_events
+      WHERE trip_id=t.id AND student_id=s.id AND type='RFID_SCAN' AND exception_type IS NULL
+      ORDER BY received_at DESC LIMIT 1) boarding ON true
+    WHERE s.active=true ORDER BY b.code NULLS LAST,s.name`);
+  res.json({ students: result.rows });
 }));
 
 app.get('/api/students', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'), asyncRoute(async (_req, res) => {
@@ -249,7 +355,7 @@ app.get('/api/students', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'
 app.post('/api/students', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRoute(async (req, res) => {
   const input = z.object({
     registrationNumber: z.string().trim().min(2).max(40),
-    rfidUid: z.string().trim().min(4).max(64),
+    rfidUid: z.string().trim().min(4).max(64).refine((value) => normalizeRfid(value).length >= 4),
     name: z.string().trim().min(2).max(100),
     department: z.string().trim().min(2).max(50),
     academicYear: z.coerce.number().int().min(1).max(8),
@@ -277,7 +383,13 @@ app.get('/api/buses', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'), 
     SELECT b.id, b.code, b.registration_number, b.route_name, b.driver_name, b.capacity,
       b.status, b.last_latitude, b.last_longitude, b.last_seen_at,
       COUNT(s.id)::int AS assigned_students,
-      (SELECT id FROM trips t WHERE t.bus_id = b.id AND t.status = 'ACTIVE' LIMIT 1) AS active_trip_id
+      (SELECT id FROM trips t WHERE t.bus_id = b.id AND t.status = 'ACTIVE' LIMIT 1) AS active_trip_id,
+      (SELECT id FROM trips t WHERE t.bus_id=b.id ORDER BY started_at DESC LIMIT 1) AS last_trip_id,
+      (SELECT started_at FROM trips t WHERE t.bus_id=b.id ORDER BY started_at DESC LIMIT 1) AS last_trip_started_at,
+      (SELECT arrived_at FROM trips t WHERE t.bus_id=b.id ORDER BY started_at DESC LIMIT 1) AS last_trip_arrived_at,
+      (SELECT COUNT(DISTINCT e.student_id)::int FROM device_events e JOIN trips t ON t.id=e.trip_id
+        WHERE t.bus_id=b.id AND t.id=(SELECT id FROM trips WHERE bus_id=b.id ORDER BY started_at DESC LIMIT 1)
+          AND e.type='RFID_SCAN' AND e.exception_type IS NULL) AS boarded_students
     FROM buses b LEFT JOIN students s ON s.assigned_bus_id = b.id AND s.active = true
     GROUP BY b.id ORDER BY b.code
   `);
@@ -298,11 +410,14 @@ app.post('/api/buses', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRoute
     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, code, registration_number, route_name, driver_name, capacity, status
   `, [input.code.toUpperCase(), input.registrationNumber.toUpperCase(), input.routeName, input.driverName,
     input.capacity, hashDeviceSecret(deviceKey)]);
+  io.to('operations').emit('bus:created', { busId: result.rows[0].id });
   res.status(201).json({ bus: result.rows[0], deviceKey, warning: 'Copy this device key now. It is not retrievable later.' });
 }));
 
 app.post('/api/trips', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRoute(async (req, res) => {
   const input = z.object({ busId: z.string().uuid() }).parse(req.body);
+  const latest = await pool.query<{ status: string }>('SELECT status FROM trips WHERE bus_id=$1 ORDER BY started_at DESC LIMIT 1', [input.busId]);
+  if (latest.rows[0]?.status === 'ARRIVED') return res.status(409).json({ error: 'Complete the last trip before starting another' });
   const result = await pool.query(`
     INSERT INTO trips (bus_id, created_by) VALUES ($1, $2) RETURNING *
   `, [input.busId, req.user!.id]);
@@ -316,6 +431,26 @@ app.post('/api/trips/:tripId/arrive', requireAuth, allowRoles('ADMIN', 'TRANSPOR
   const tripId = z.string().uuid().parse(req.params.tripId);
   const result = await markTripArrived(tripId, 'MANUAL_AUTHORIZED');
   res.json(result);
+}));
+
+app.post('/api/trips/:tripId/complete', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRoute(async (req, res) => {
+  const tripId = z.string().uuid().parse(req.params.tripId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query<{ bus_id: string; status: string }>('SELECT bus_id,status FROM trips WHERE id=$1 FOR UPDATE', [tripId]);
+    if (!found.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Trip not found' }); }
+    if (found.rows[0].status !== 'ARRIVED') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Confirm campus arrival before completing the trip' }); }
+    await client.query("UPDATE trips SET status='COMPLETED' WHERE id=$1", [tripId]);
+    await client.query("UPDATE buses SET status='IDLE' WHERE id=$1", [found.rows[0].bus_id]);
+    await client.query(`INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,after_value)
+      VALUES ($1,'COMPLETE_TRIP','trip',$2,$3)`, [req.user!.id, tripId, JSON.stringify({ status: 'COMPLETED' })]);
+    await client.query('COMMIT');
+    io.to('operations').emit('trip:completed', { tripId });
+    io.to('portal').emit('portal:changed');
+    res.json({ tripId, status: 'COMPLETED' });
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
 }));
 
 app.get('/api/timetables', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'), asyncRoute(async (_req, res) => {
@@ -347,6 +482,8 @@ app.post('/api/timetables', requireAuth, allowRoles('ADMIN', 'FACULTY'), asyncRo
     RETURNING *
   `, [input.department.toUpperCase(), input.academicYear, input.section.toUpperCase(), input.weekday,
     input.startsAt, input.endsAt, input.subjectCode.toUpperCase(), input.subjectName, input.facultyId ?? req.user!.id]);
+  io.to('operations').emit('timetable:changed', { timetableId: result.rows[0].id });
+  io.to('portal').emit('portal:changed');
   res.status(201).json({ timetable: result.rows[0] });
 }));
 
@@ -354,7 +491,7 @@ const deviceEventSchema = z.object({
   busCode: z.string().trim().min(2).max(20),
   eventId: z.string().trim().min(4).max(120),
   type: z.enum(['RFID_SCAN', 'GPS']),
-  rfidUid: z.string().trim().min(4).max(64).optional(),
+  rfidUid: z.string().trim().min(4).max(64).refine((value) => normalizeRfid(value).length >= 4).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   deviceTimestamp: z.string().datetime(),

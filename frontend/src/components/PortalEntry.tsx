@@ -3,7 +3,7 @@ import { ArrowRight, BusFront, CalendarDays, Fingerprint, GraduationCap, Radar, 
 
 type Role = 'STUDENT' | 'PARENT';
 
-export default function PortalEntry({ role, onSignIn, onNavigate }: { role: Role; onSignIn: () => void; onNavigate: (path: string) => void }) {
+export default function PortalEntry({ role, onSignIn, onRegister, onNavigate }: { role: Role; onSignIn: () => void; onRegister: () => void; onNavigate: (path: string) => void }) {
   const parent = role === 'PARENT';
   const title = parent ? 'Stay close to every journey.' : 'Your campus day, connected.';
   const subtitle = parent
@@ -27,8 +27,8 @@ export default function PortalEntry({ role, onSignIn, onNavigate }: { role: Role
         <span className="section-kicker">{parent ? <Users size={15}/> : <GraduationCap size={15}/>} {parent ? 'FAMILY PORTAL' : 'STUDENT PORTAL'}</span>
         <h1>{title}</h1>
         <p>{subtitle}</p>
-        <button className="button button-primary" onClick={onSignIn}>Open {parent ? 'parent' : 'student'} dashboard <ArrowRight size={17}/></button>
-        <small>Use the {parent ? 'parent' : 'student'} account linked to a registered student. Your campus administrator creates and links access.</small>
+        <div className="portal-entry-actions"><button className="button button-primary" onClick={onSignIn}>Open {parent ? 'parent' : 'student'} dashboard <ArrowRight size={17}/></button><button className="button button-ghost" onClick={onRegister}>Register as {parent ? 'parent' : 'student'}</button></div>
+        <small>{parent ? 'Parent registration matches the contact details already stored for a student.' : 'Student registration connects your academic details and RFID card to a real registered bus.'}</small>
       </motion.div>
       <motion.div className="portal-entry-visual" initial={{ opacity: 0, x: 42 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: .85, delay: .15 }} aria-hidden="true">
         <img src="/images/campus-transit-hero.png" alt=""/>

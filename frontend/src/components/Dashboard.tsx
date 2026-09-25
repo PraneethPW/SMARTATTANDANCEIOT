@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { io } from 'socket.io-client';
 import { api, API_URL, type Session } from '../api';
-import type { Analytics, Attendance, Bus, DeviceEvent, Student } from '../types';
+import type { Analytics, Attendance, BoardingStudent, Bus, DeviceEvent, Student } from '../types';
 import PortalManagement from './PortalManagement';
 
 type Tab = 'overview' | 'live' | 'attendance' | 'registry' | 'portals' | 'ai';
@@ -36,6 +36,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
   const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [boarding, setBoarding] = useState<BoardingStudent[]>([]);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -53,15 +54,16 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [a, b, e, at, s, tt] = await Promise.all([
+      const [a, b, e, at, s, tt, board] = await Promise.all([
         api<Analytics>('/api/analytics/overview', {}, session.token),
         api<{ buses: Bus[] }>('/api/buses', {}, session.token),
         api<{ events: DeviceEvent[] }>('/api/events?limit=80', {}, session.token),
         api<{ attendance: Attendance[] }>('/api/attendance', {}, session.token),
         api<{ students: Student[] }>('/api/students', {}, session.token),
         api<{ timetables: Timetable[] }>('/api/timetables', {}, session.token),
+        api<{ students: BoardingStudent[] }>('/api/boarding', {}, session.token),
       ]);
-      setAnalytics(a); setBuses(b.buses); setEvents(e.events); setAttendance(at.attendance); setStudents(s.students); setTimetables(tt.timetables);
+      setAnalytics(a); setBuses(b.buses); setEvents(e.events); setAttendance(at.attendance); setStudents(s.students); setTimetables(tt.timetables); setBoarding(board.students);
     } catch (error) { toast(error instanceof Error ? error.message : 'Unable to load platform data', 'error'); }
     finally { setLoading(false); }
   }, [session.token, toast]);
@@ -75,16 +77,28 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
     socket.on('disconnect', () => setSocketStatus('offline'));
     socket.on('connect_error', () => setSocketStatus('offline'));
     socket.io.on('reconnect_attempt', () => setSocketStatus('connecting'));
-    socket.on('device:event', () => update('New device event received'));
+    socket.on('device:event', (event: DeviceEvent) => { if (event.type === 'RFID_SCAN') toast('New boarding scan received', 'live'); void refresh(true); });
+    socket.on('trip:started', () => update('Bus trip started'));
     socket.on('trip:arrived', () => update('Campus arrival verified'));
+    socket.on('trip:completed', () => update('Bus trip completed'));
+    socket.on('student:created', () => { setPortalRefreshKey((value) => value + 1); void refresh(true); });
+    socket.on('user:created', () => setPortalRefreshKey((value) => value + 1));
+    socket.on('bus:created', () => void refresh(true));
+    socket.on('timetable:changed', () => void refresh(true));
     socket.on('attendance:synchronized', () => update('Class attendance synchronized'));
     socket.on('attendance:updated', () => void refresh(true));
-    return () => { socket.disconnect(); };
+    const poll = window.setInterval(() => void refresh(true), 15_000);
+    return () => { socket.disconnect(); window.clearInterval(poll); };
   }, [refresh, session.token, toast]);
 
   const unresolved = useMemo(() => events.filter((event) => event.exception_type), [events]);
   const roleCanOperate = ['ADMIN', 'TRANSPORT'].includes(session.user.role);
   const roleCanVerify = ['ADMIN', 'FACULTY'].includes(session.user.role);
+  const visibleNav = nav.filter(({ id }) => {
+    if (session.user.role === 'ADMIN') return true;
+    if (session.user.role === 'FACULTY') return id !== 'portals';
+    return ['overview', 'live', 'registry'].includes(id);
+  });
 
   return (
     <div className="dashboard-shell">
@@ -93,7 +107,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
         <div className="workspace-chip"><div className="workspace-avatar">KA</div><div><span>Workspace</span><strong>Smart Campus</strong></div><ChevronRight size={15} /></div>
         <nav className="side-nav">
           <span className="side-label">COMMAND</span>
-          {nav.filter((item) => item.id !== 'portals' || session.user.role === 'ADMIN').map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMobileNav(false); }}><Icon size={18} /><span>{label}</span>{id === 'attendance' && analytics?.totals.awaiting_review ? <i>{analytics.totals.awaiting_review}</i> : null}</button>)}
+          {visibleNav.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMobileNav(false); }}><Icon size={18} /><span>{label}</span>{id === 'attendance' && analytics?.totals.awaiting_review ? <i>{analytics.totals.awaiting_review}</i> : null}</button>)}
         </nav>
         <div className={`sidebar-system connection-${socketStatus}`}><div><span className="live-dot" /><strong>{socketStatus === 'live' ? 'Realtime connected' : socketStatus === 'connecting' ? 'Reconnecting…' : 'Realtime offline'}</strong></div><p>{socketStatus === 'live' ? 'Authenticated socket channel active' : 'REST remains available while socket retries'}</p></div>
         <button className="profile-card" onClick={onLogout}><span><CircleUserRound size={20} /></span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><LogOut size={16} /></button>
@@ -102,13 +116,15 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
       <main className="dashboard-main">
         <header className="dash-header">
           <button className="icon-button mobile-only" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
-          <div><span className="dash-kicker">OPERATIONS / {tab.toUpperCase()}</span><h1>{nav.find((item) => item.id === tab)?.label}</h1></div>
+          <div><span className="dash-kicker">{session.user.role === 'FACULTY' ? 'FACULTY' : session.user.role === 'TRANSPORT' ? 'TRANSPORT' : 'OPERATIONS'} / {tab.toUpperCase()}</span><h1>{visibleNav.find((item) => item.id === tab)?.label}</h1></div>
           <div className="header-actions"><span className={`time-status connection-${socketStatus}`}>{socketStatus === 'live' ? <Wifi size={12}/> : <WifiOff size={12}/>} {socketStatus.toUpperCase()}</span><button className="icon-button" onClick={() => void refresh()} aria-label="Refresh"><RefreshCw size={17} className={loading ? 'spin' : ''} /></button><div className="header-avatar">{session.user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div></div>
         </header>
 
         <div className="dashboard-content">
           {loading && !analytics ? <div className="page-loader"><LoaderCircle className="spin" /><span>Connecting to live operations…</span></div> : null}
-          {tab === 'overview' && analytics ? <Overview analytics={analytics} buses={buses} events={events} unresolved={unresolved} onNavigate={setTab} /> : null}
+          {tab === 'overview' && analytics && session.user.role === 'ADMIN' ? <Overview analytics={analytics} buses={buses} events={events} unresolved={unresolved} onNavigate={setTab} /> : null}
+          {tab === 'overview' && analytics && session.user.role === 'FACULTY' ? <FacultyOverview buses={buses} boarding={boarding} attendance={attendance} onNavigate={setTab} /> : null}
+          {tab === 'overview' && analytics && session.user.role === 'TRANSPORT' ? <TransportOverview buses={buses} boarding={boarding} events={events} token={session.token} toast={toast} onRefresh={() => void refresh(true)} onOpenBus={() => setPanel('bus')} /> : null}
           {tab === 'live' ? <LiveFleet buses={buses} events={events} canOperate={roleCanOperate} onOpenBus={() => setPanel('bus')} onRefresh={() => void refresh(true)} toast={toast} token={session.token} /> : null}
           {tab === 'attendance' ? <AttendanceView rows={attendance} canVerify={roleCanVerify} token={session.token} toast={toast} onRefresh={() => void refresh(true)} /> : null}
           {tab === 'registry' ? <Registry students={students} timetables={timetables} buses={buses} canManageUsers={session.user.role === 'ADMIN'} canManageStudents={roleCanOperate} canManageTimetables={roleCanVerify} onOpen={(next) => { if (next === 'user') setNewUserRole('FACULTY'); setPanel(next); }} /> : null}
@@ -156,12 +172,43 @@ function Overview({ analytics, buses, events, unresolved, onNavigate }: { analyt
   </div>;
 }
 
+function FacultyOverview({ buses, boarding, attendance, onNavigate }: { buses: Bus[]; boarding: BoardingStudent[]; attendance: Attendance[]; onNavigate: (tab: Tab) => void }) {
+  const active = buses.filter((bus) => bus.status === 'IN_TRANSIT');
+  const boarded = boarding.filter((student) => ['ACTIVE', 'ARRIVED'].includes(student.trip_status || '') && student.boarded_at);
+  const awaiting = attendance.filter((record) => record.status === 'PROVISIONAL');
+  return <div className="page-stack">
+    <section className="welcome-row"><div><span className="section-kicker">FACULTY LIVE VIEW</span><h2>Know who is arriving.<br/><em>Verify what counts.</em></h2><p>Boarding comes from actual RFID events. Class attendance stays provisional until faculty review.</p></div><div className="pulse-orbit"><span/><GraduationCap size={34}/></div></section>
+    <section className="portal-stat-grid"><div className="portal-stat"><BusFront/><span>Buses in transit</span><strong>{active.length}</strong><small>{buses.length} registered buses</small></div><div className="portal-stat"><Fingerprint/><span>Boarded on current trips</span><strong>{boarded.length}</strong><small>Confirmed RFID scans</small></div><div className="portal-stat"><MapPin/><span>Buses arrived</span><strong>{buses.filter((bus) => bus.status === 'ARRIVED').length}</strong><small>Campus arrival confirmed</small></div><div className="portal-stat"><Clock3/><span>Attendance to review</span><strong>{awaiting.length}</strong><small>Faculty action required</small></div></section>
+    <div className="page-title-row"><div><span className="section-kicker">SHARED BUS STATUS</span><h2>Campus arrivals</h2><p>These states update when transport starts or reaches a trip and when devices scan students.</p></div><button className="button button-ghost button-compact" onClick={() => onNavigate('attendance')}>Review attendance <ArrowRight size={15}/></button></div>
+    <BusStatusGrid buses={buses}/>
+    <BoardingBoard students={boarding} title="Student boarding"/>
+  </div>;
+}
+
+function TransportOverview({ buses, boarding, events, token, toast, onRefresh, onOpenBus }: { buses: Bus[]; boarding: BoardingStudent[]; events: DeviceEvent[]; token: string; toast: (s: string, k?: Toast['kind']) => void; onRefresh: () => void; onOpenBus: () => void }) {
+  return <div className="page-stack">
+    <section className="welcome-row"><div><span className="section-kicker">TRANSPORT CONTROL</span><h2>Start the route.<br/><em>Close the loop.</em></h2><p>Start trips, confirm campus arrival, and watch live RFID boarding from the same bus records seen by faculty and families.</p></div><div className="pulse-orbit"><span/><BusFront size={34}/></div></section>
+    <section className="portal-stat-grid"><div className="portal-stat"><BusFront/><span>In transit</span><strong>{buses.filter((bus) => bus.status === 'IN_TRANSIT').length}</strong><small>Trips currently running</small></div><div className="portal-stat"><Fingerprint/><span>Boarded on current trips</span><strong>{boarding.filter((student) => ['ACTIVE', 'ARRIVED'].includes(student.trip_status || '') && student.boarded_at).length}</strong><small>Real RFID scans</small></div><div className="portal-stat"><MapPin/><span>At campus</span><strong>{buses.filter((bus) => bus.status === 'ARRIVED').length}</strong><small>Ready to complete</small></div><div className="portal-stat"><Activity/><span>Recent device packets</span><strong>{events.length}</strong><small>Latest accepted events</small></div></section>
+    <LiveFleet buses={buses} events={events} canOperate onOpenBus={onOpenBus} onRefresh={onRefresh} toast={toast} token={token}/>
+    <BoardingBoard students={boarding} title="Boarding manifest"/>
+  </div>;
+}
+
+function BusStatusGrid({ buses }: { buses: Bus[] }) {
+  return <div className="faculty-bus-grid">{buses.map((bus) => <article className="faculty-bus-card" key={bus.id}><div><span className="bus-badge"><BusFront size={18}/></span><div><strong>{bus.code}</strong><small>{bus.route_name}</small></div><Status value={bus.status}/></div><p>{bus.boarded_students} boarded · {bus.assigned_students} assigned</p><small>{bus.status === 'IN_TRANSIT' && bus.last_trip_started_at ? `Started ${timeAgo(bus.last_trip_started_at)}` : bus.status === 'ARRIVED' && bus.last_trip_arrived_at ? `Arrived ${timeAgo(bus.last_trip_arrived_at)}` : 'No trip in progress'}</small></article>)}{!buses.length && <div className="portal-empty">Transport has not registered any buses yet.</div>}</div>;
+}
+
+function BoardingBoard({ students, title }: { students: BoardingStudent[]; title: string }) {
+  return <section className="dash-card"><div className="card-head"><div><h3>{title}</h3><span>Latest trip and valid RFID scan for each registered student</span></div></div><div className="boarding-table"><div className="boarding-table-head"><span>Student</span><span>Class</span><span>Bus</span><span>Trip</span><span>Boarding</span></div>{students.map((student) => <div className="boarding-table-row" key={student.id}><span><strong>{student.name}</strong><small>{student.registration_number}</small></span><span>{student.department} Y{student.academic_year}-{student.section}</span><span>{student.bus_code || 'Unassigned'}</span><span><Status value={student.trip_status || 'IDLE'}/></span><span>{student.boarded_at ? <><strong>Boarded</strong><small>{timeAgo(student.boarded_at)}</small></> : <small>No valid scan for this trip</small>}</span></div>)}{!students.length && <div className="portal-empty">No registered students yet.</div>}</div></section>;
+}
+
 function LiveFleet({ buses, events, canOperate, onOpenBus, onRefresh, toast, token }: { buses: Bus[]; events: DeviceEvent[]; canOperate: boolean; onOpenBus: () => void; onRefresh: () => void; toast: (s: string, k?: Toast['kind']) => void; token: string }) {
   const startTrip = async (busId: string) => { try { await api('/api/trips', { method: 'POST', body: JSON.stringify({ busId }) }, token); toast('Trip started and ready for device events'); onRefresh(); } catch (e) { toast(e instanceof Error ? e.message : 'Could not start trip', 'error'); } };
   const arrive = async (tripId: string) => { try { await api(`/api/trips/${tripId}/arrive`, { method: 'POST' }, token); toast('Authorized campus arrival processed'); onRefresh(); } catch (e) { toast(e instanceof Error ? e.message : 'Arrival failed', 'error'); } };
+  const complete = async (tripId: string) => { try { await api(`/api/trips/${tripId}/complete`, { method: 'POST' }, token); toast('Trip completed and bus ready for its next route'); onRefresh(); } catch (e) { toast(e instanceof Error ? e.message : 'Could not complete trip', 'error'); } };
   return <div className="page-stack">
     <div className="page-title-row"><div><span className="section-kicker">REALTIME TELEMETRY</span><h2>Fleet control</h2><p>Only genuine device packets and authorized operator actions appear here.</p></div>{canOperate && <button className="button button-primary button-compact" onClick={onOpenBus}><Plus size={16}/> Add bus</button>}</div>
-    <section className="fleet-grid">{buses.map((bus) => <article className="fleet-card" key={bus.id}><div className="fleet-card-head"><div className="bus-badge"><BusFront size={22}/></div><div><span>{bus.code}</span><strong>{bus.registration_number}</strong></div><Status value={bus.status}/></div><div className="route-line"><span className="route-node"/><i/><span className="route-node campus"/></div><div className="fleet-route"><span>{bus.route_name}</span><strong>Campus</strong></div><div className="fleet-metrics"><div><Users size={16}/><span>Assigned</span><strong>{bus.assigned_students}/{bus.capacity}</strong></div><div><MapPin size={16}/><span>Last position</span><strong>{bus.last_latitude == null ? 'Awaiting GPS' : `${Number(bus.last_latitude).toFixed(4)}, ${Number(bus.last_longitude).toFixed(4)}`}</strong></div></div>{canOperate && <div className="fleet-actions">{bus.active_trip_id ? <button className="button button-ghost button-compact" onClick={() => void arrive(bus.active_trip_id!)}>Confirm campus arrival</button> : <button className="button button-primary button-compact" onClick={() => void startTrip(bus.id)}>Start trip <ArrowRight size={14}/></button>}</div>}</article>)}{!buses.length && <EmptyPanel icon={<BusFront/>} title="No buses configured" text="Add a bus to generate a one-time ESP32 device secret and begin a live trip." action={canOperate ? <button className="button button-primary" onClick={onOpenBus}>Add first bus</button> : undefined}/>}</section>
+    <section className="fleet-grid">{buses.map((bus) => <article className="fleet-card" key={bus.id}><div className="fleet-card-head"><div className="bus-badge"><BusFront size={22}/></div><div><span>{bus.code}</span><strong>{bus.registration_number}</strong></div><Status value={bus.status}/></div><div className="route-line"><span className="route-node"/><i/><span className="route-node campus"/></div><div className="fleet-route"><span>{bus.route_name}</span><strong>Campus</strong></div><div className="fleet-metrics"><div><Users size={16}/><span>Boarded / assigned</span><strong>{bus.boarded_students}/{bus.assigned_students}</strong></div><div><MapPin size={16}/><span>Last position</span><strong>{bus.last_latitude == null ? 'Awaiting GPS' : `${Number(bus.last_latitude).toFixed(4)}, ${Number(bus.last_longitude).toFixed(4)}`}</strong></div></div>{canOperate && <div className="fleet-actions">{bus.active_trip_id ? <button className="button button-ghost button-compact" onClick={() => void arrive(bus.active_trip_id!)}>Confirm campus arrival</button> : bus.status === 'ARRIVED' && bus.last_trip_id ? <button className="button button-primary button-compact" onClick={() => void complete(bus.last_trip_id!)}>Complete trip <Check size={14}/></button> : <button className="button button-primary button-compact" onClick={() => void startTrip(bus.id)}>Start trip <ArrowRight size={14}/></button>}</div>}</article>)}{!buses.length && <EmptyPanel icon={<BusFront/>} title="No buses configured" text="Add a bus to generate a one-time ESP32 device secret and begin a live trip." action={canOperate ? <button className="button button-primary" onClick={onOpenBus}>Add first bus</button> : undefined}/>}</section>
     {canOperate ? <DeviceIngestionConsole buses={buses} toast={toast} onAccepted={onRefresh} /> : null}
     <Card title="Device event stream" subtitle={`${events.length} latest accepted packets`}><div className="event-table"><div className="event-table-head"><span>Event</span><span>Identity / coordinate</span><span>Bus</span><span>Received</span><span>State</span></div>{events.map((event) => <div className="event-table-row" key={event.id}><span><i className={`event-type ${event.type === 'GPS' ? 'gps' : ''}`}>{event.type === 'GPS' ? <MapPin size={15}/> : <ScanLine size={15}/>}</i>{pretty(event.type)}</span><span><strong>{event.student_name || (event.latitude != null ? `${Number(event.latitude).toFixed(5)}, ${Number(event.longitude).toFixed(5)}` : event.rfid_uid)}</strong>{event.department ? <small>{event.department} · Y{event.academic_year} · {event.section}</small> : null}</span><span>{event.bus_code}</span><span>{timeAgo(event.received_at)}</span><span>{event.exception_type ? <Status value={event.exception_type}/> : <Status value="VALID"/>}</span></div>)}{!events.length && <Empty label="The event rail is listening" />}</div></Card>
   </div>;

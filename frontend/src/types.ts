@@ -1,7 +1,15 @@
 export type Bus = {
   id: string; code: string; registration_number: string; route_name: string; driver_name: string;
   capacity: number; status: string; last_latitude: number | null; last_longitude: number | null;
-  last_seen_at: string | null; assigned_students: number; active_trip_id: string | null;
+  last_seen_at: string | null; assigned_students: number; active_trip_id: string | null; last_trip_id: string | null;
+  last_trip_started_at: string | null; last_trip_arrived_at: string | null; boarded_students: number;
+};
+
+export type BoardingStudent = {
+  id: string; name: string; registration_number: string; department: string; academic_year: number; section: string;
+  bus_code: string | null; route_name: string | null; bus_status: string | null;
+  trip_id: string | null; trip_status: string | null; trip_started_at: string | null;
+  trip_arrived_at: string | null; boarded_at: string | null;
 };
 
 export type Student = {

@@ -25,15 +25,13 @@ If pnpm is not installed, run `npm install -g pnpm@11.19.0` once.
 
 The API runs locally on `http://localhost:8081` and applies the idempotent SQL schema automatically on startup. Open `http://localhost:5173`, choose **Initialize workspace**, and create the first administrator. This route disables itself permanently once the first account exists.
 
-## Hardware ingestion
-
 ## Student and parent portals
 
-The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Each page opens role-aware sign-in. Administrators manage access under **Portals** in the operations dashboard: register the student in **Registry**, create a student or parent account linked to that registration, then share its credentials securely with the account holder. **Link another child** adds another student to an existing parent account. Student and parent accounts open their own role-specific dashboards after sign-in; an administrator account remains in operations.
+The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Students can register immediately with their name, registration number, RFID UID, department, year, section, and an existing bus. If a campus student record already exists, these details must match before the account can claim it. Parents can register with the parent name and contact already recorded for a registered child. Administrators can also create linked accounts under **Portals** and use **Link another child** to add students to an existing parent account. An administrator account remains in operations.
 
 Both portals display the linked student's class timetable, assigned bus and route, RFID boarding history, and attendance. A bus scan is evidence of boarding; it does not itself mark academic attendance. Arrival at the campus geofence creates provisional attendance for a matched timetable session, and faculty verification updates the status shown in the portals. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
 
-The schema changes are applied automatically at API startup, as with the existing schema. Existing accounts and student records remain in place. An administrator must explicitly create and link portal accounts; knowing a registration number alone does not grant access.
+All roles read the same bus, trip, RFID, and attendance tables. Transport can start, confirm arrival, and complete trips; faculty sees the boarding manifest and reviews provisional attendance; students and parents see their linked journeys and records. Socket events refresh each screen immediately, with a 15-second polling fallback. Existing accounts and student records remain in place.
 
 ## Hardware ingestion
 

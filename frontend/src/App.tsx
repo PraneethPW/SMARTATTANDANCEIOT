@@ -14,6 +14,7 @@ export default function App() {
     catch { return null; }
   });
   const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -47,5 +48,5 @@ export default function App() {
 
   if (session) return <Suspense fallback={<div className="page-loader"><span>Loading dashboard…</span></div>}>{['PARENT', 'STUDENT'].includes(session.user.role) ? <Portal session={session} onLogout={logout} /> : <Dashboard session={session} onLogout={logout} />}</Suspense>;
   const portalRole = path === '/student' ? 'STUDENT' : path === '/parent' ? 'PARENT' : null;
-  return <>{portalRole ? <PortalEntry role={portalRole} onSignIn={() => setAuthOpen(true)} onNavigate={navigate} /> : <Landing onEnter={() => setAuthOpen(true)} />}<AuthModal open={authOpen} portalRole={portalRole} onClose={() => setAuthOpen(false)} onAuthenticated={(value) => { setSession(value); setAuthOpen(false); navigate(value.user.role === 'STUDENT' ? '/student' : value.user.role === 'PARENT' ? '/parent' : '/app'); }} /></>;
+  return <>{portalRole ? <PortalEntry role={portalRole} onSignIn={() => { setAuthMode('login'); setAuthOpen(true); }} onRegister={() => { setAuthMode('signup'); setAuthOpen(true); }} onNavigate={navigate} /> : <Landing onEnter={() => { setAuthMode('login'); setAuthOpen(true); }} />}<AuthModal open={authOpen} initialMode={authMode} portalRole={portalRole} onClose={() => setAuthOpen(false)} onAuthenticated={(value) => { setSession(value); setAuthOpen(false); navigate(value.user.role === 'STUDENT' ? '/student' : value.user.role === 'PARENT' ? '/parent' : '/app'); }} /></>;
 }
