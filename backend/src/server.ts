@@ -55,7 +55,8 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  socket.join('operations');
+  if (['ADMIN', 'FACULTY', 'TRANSPORT'].includes(socket.data.user.role)) socket.join('operations');
+  else socket.join('portal');
   socket.emit('system:ready', { at: new Date().toISOString() });
 });
 
@@ -151,7 +152,7 @@ app.post('/api/auth/signup', asyncRoute(async (req, res) => {
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const input = z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1) }).parse(req.body);
   const result = await pool.query<{
-    id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT'; password_hash: string;
+    id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT' | 'STUDENT'; password_hash: string;
   }>('SELECT id, name, email, role, password_hash FROM users WHERE email = $1', [input.email]);
   const found = result.rows[0];
   if (!found || !(await bcrypt.compare(input.password, found.password_hash))) {
@@ -169,15 +170,64 @@ app.get('/api/users', requireAuth, allowRoles('ADMIN'), asyncRoute(async (_req, 
 }));
 
 app.post('/api/users', requireAuth, allowRoles('ADMIN'), asyncRoute(async (req, res) => {
-  const input = credentialsSchema.extend({ role: z.enum(['ADMIN', 'FACULTY', 'TRANSPORT']) }).parse(req.body);
+  const input = credentialsSchema.extend({ role: z.enum(['ADMIN', 'FACULTY', 'TRANSPORT', 'PARENT', 'STUDENT']), registrationNumber: z.string().trim().optional() }).parse(req.body);
+  if (['PARENT', 'STUDENT'].includes(input.role) && !input.registrationNumber) return res.status(400).json({ error: 'Select a registered student for this account' });
+  const student = input.registrationNumber ? await pool.query<{ id: string }>('SELECT id FROM students WHERE registration_number = $1 AND active = true', [input.registrationNumber]) : null;
+  if (input.registrationNumber && !student?.rows[0]) return res.status(404).json({ error: 'Active student registration not found' });
   const passwordHash = await bcrypt.hash(input.password, 12);
-  const result = await pool.query(`
-    INSERT INTO users (name, email, password_hash, role) VALUES ($1,$2,$3,$4)
-    RETURNING id, name, email, role, created_at
-  `, [input.name, input.email, passwordHash, input.role]);
-  await pool.query(`INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, after_value)
-    VALUES ($1,'CREATE_USER','user',$2,$3)`, [req.user!.id, result.rows[0].id, result.rows[0]]);
-  res.status(201).json({ user: result.rows[0] });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(`INSERT INTO users (name, email, password_hash, role) VALUES ($1,$2,$3,$4)
+      RETURNING id, name, email, role, created_at`, [input.name, input.email, passwordHash, input.role]);
+    if (student?.rows[0]) await client.query(`INSERT INTO student_user_links (user_id, student_id, relationship) VALUES ($1,$2,$3)`,
+      [result.rows[0].id, student.rows[0].id, input.role === 'STUDENT' ? 'SELF' : 'PARENT']);
+    await client.query(`INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, after_value)
+      VALUES ($1,'CREATE_USER','user',$2,$3)`, [req.user!.id, result.rows[0].id, JSON.stringify({ ...result.rows[0], registrationNumber: input.registrationNumber })]);
+    await client.query('COMMIT');
+    res.status(201).json({ user: result.rows[0] });
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}));
+
+app.post('/api/users/:userId/students', requireAuth, allowRoles('ADMIN'), asyncRoute(async (req, res) => {
+  const userId = z.string().uuid().parse(req.params.userId);
+  const { registrationNumber } = z.object({ registrationNumber: z.string().trim().min(2) }).parse(req.body);
+  const result = await pool.query(`INSERT INTO student_user_links (user_id, student_id, relationship)
+    SELECT u.id, s.id, 'PARENT' FROM users u CROSS JOIN students s
+    WHERE u.id=$1 AND u.role='PARENT' AND s.registration_number=$2 AND s.active=true
+    ON CONFLICT DO NOTHING RETURNING student_id`, [userId, registrationNumber]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Parent or active student not found, or link already exists' });
+  io.to('portal').emit('portal:changed');
+  res.status(201).json({ studentId: result.rows[0].student_id });
+}));
+
+app.get('/api/portal', requireAuth, allowRoles('STUDENT', 'PARENT'), asyncRoute(async (req, res) => {
+  const userId = req.user!.id;
+  const students = await pool.query(`SELECT s.id, s.name, s.registration_number, s.department, s.academic_year, s.section,
+      s.assigned_bus_id, b.code AS bus_code, b.route_name, b.driver_name, b.status AS bus_status,
+      b.last_seen_at, b.last_latitude, b.last_longitude, l.relationship
+    FROM student_user_links l JOIN students s ON s.id=l.student_id
+    LEFT JOIN buses b ON b.id=s.assigned_bus_id
+    WHERE l.user_id=$1 AND s.active=true ORDER BY s.name`, [userId]);
+  const [attendance, scans, timetable] = await Promise.all([
+    pool.query(`SELECT ar.id, ar.student_id, ar.status, ar.source, ar.created_at, ar.verified_at,
+        ats.session_date, ats.subject_code, ats.subject_name, b.code AS bus_code
+      FROM attendance_records ar JOIN student_user_links l ON l.student_id=ar.student_id AND l.user_id=$1
+      JOIN attendance_sessions ats ON ats.id=ar.session_id
+      LEFT JOIN trips t ON t.id=ar.trip_id LEFT JOIN buses b ON b.id=t.bus_id
+      ORDER BY ats.session_date DESC, ar.created_at DESC LIMIT 150`, [userId]),
+    pool.query(`SELECT e.id, e.student_id, e.device_timestamp, e.received_at, e.exception_type,
+        b.code AS bus_code, t.status AS trip_status
+      FROM device_events e JOIN student_user_links l ON l.student_id=e.student_id AND l.user_id=$1
+      JOIN buses b ON b.id=e.bus_id JOIN trips t ON t.id=e.trip_id
+      WHERE e.type='RFID_SCAN' ORDER BY e.received_at DESC LIMIT 80`, [userId]),
+    pool.query(`SELECT t.id, s.id AS student_id, t.weekday, t.starts_at, t.ends_at, t.subject_code, t.subject_name
+      FROM student_user_links l JOIN students s ON s.id=l.student_id
+      JOIN timetables t ON t.department=s.department AND t.academic_year=s.academic_year AND t.section=s.section
+      WHERE l.user_id=$1 ORDER BY t.weekday, t.starts_at`, [userId]),
+  ]);
+  res.json({ students: students.rows, attendance: attendance.rows, scans: scans.rows, timetable: timetable.rows });
 }));
 
 app.get('/api/students', requireAuth, allowRoles('ADMIN', 'FACULTY', 'TRANSPORT'), asyncRoute(async (_req, res) => {
@@ -213,6 +263,7 @@ app.post('/api/students', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRo
     input.academicYear, input.section.toUpperCase(), input.parentName ?? null, input.parentContact ?? null,
     input.assignedBusId ?? null]);
   io.to('operations').emit('student:created', result.rows[0]);
+  io.to('portal').emit('portal:changed');
   res.status(201).json({ student: result.rows[0] });
 }));
 
@@ -252,6 +303,7 @@ app.post('/api/trips', requireAuth, allowRoles('ADMIN', 'TRANSPORT'), asyncRoute
   `, [input.busId, req.user!.id]);
   await pool.query(`UPDATE buses SET status = 'IN_TRANSIT' WHERE id = $1`, [input.busId]);
   io.to('operations').emit('trip:started', result.rows[0]);
+  io.to('portal').emit('portal:changed');
   res.status(201).json({ trip: result.rows[0] });
 }));
 
@@ -375,6 +427,7 @@ app.post('/api/device/events', asyncRoute(async (req, res) => {
   }
 
   io.to('operations').emit('device:event', event);
+  if (input.type === 'RFID_SCAN' && studentId) io.to('portal').emit('portal:changed');
   res.status(202).json({ accepted: true, duplicate: false, exceptionType, arrival });
 }));
 
@@ -431,6 +484,7 @@ app.patch('/api/attendance/:recordId', requireAuth, allowRoles('ADMIN', 'FACULTY
       [req.user!.id, recordId, before.rows[0], updated.rows[0]]);
     await client.query('COMMIT');
     io.to('operations').emit('attendance:updated', updated.rows[0]);
+    io.to('portal').emit('portal:changed');
     res.json({ attendance: updated.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -551,6 +605,7 @@ async function markTripArrived(tripId: string, source: 'GPS_GEOFENCE' | 'MANUAL_
     const payload = { alreadyArrived: false, tripId, source, synchronized, arrivedAt: new Date().toISOString() };
     io.to('operations').emit('trip:arrived', payload);
     io.to('operations').emit('attendance:synchronized', payload);
+    io.to('portal').emit('portal:changed');
     return payload;
   } catch (error) {
     await client.query('ROLLBACK');

@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN','FACULTY','TRANSPORT','PARENT','STUDENT'));
+
 CREATE TABLE IF NOT EXISTS buses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   code text NOT NULL UNIQUE,
@@ -38,6 +41,15 @@ CREATE TABLE IF NOT EXISTS students (
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS student_user_links (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  student_id uuid NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  relationship text NOT NULL CHECK (relationship IN ('SELF','PARENT')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS student_user_links_student_idx ON student_user_links(student_id);
 
 CREATE TABLE IF NOT EXISTS timetables (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

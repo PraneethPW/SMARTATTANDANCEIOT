@@ -2,7 +2,7 @@ export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.rep
 
 export type Session = {
   token: string;
-  user: { id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT' };
+  user: { id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT' | 'STUDENT' };
 };
 
 export class ApiError extends Error {

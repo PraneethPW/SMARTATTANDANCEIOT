@@ -27,6 +27,16 @@ The API runs locally on `http://localhost:8081` and applies the idempotent SQL s
 
 ## Hardware ingestion
 
+## Student and parent portals
+
+Administrators can create student and parent accounts from **Registry → Add user**. Select the account role and a registered student; the account is linked to that student before it can access the portal. To show multiple children in one parent account, use **Registry → Link child**. Share the login credentials securely with the account holder. Student and parent accounts sign in through the existing landing page and open their own role-specific dashboard.
+
+Both portals display the linked student's class timetable, assigned bus and route, RFID boarding history, and attendance. A bus scan is evidence of boarding; it does not itself mark academic attendance. Arrival at the campus geofence creates provisional attendance for a matched timetable session, and faculty verification updates the status shown in the portals. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
+
+The schema changes are applied automatically at API startup, as with the existing schema. Existing accounts and student records remain in place. An administrator must explicitly create and link portal accounts; knowing a registration number alone does not grant access.
+
+## Hardware ingestion
+
 Create a bus in the dashboard. The API returns its device secret exactly once. The ESP32 sends HTTPS requests to `POST /api/device/events` with:
 
 ```http

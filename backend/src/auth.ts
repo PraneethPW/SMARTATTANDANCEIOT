@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from './config.js';
 
-export type Role = 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT';
+export type Role = 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT' | 'STUDENT';
 export type SessionUser = { id: string; name: string; email: string; role: Role };
 
 declare global {
