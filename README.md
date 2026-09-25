@@ -60,8 +60,7 @@ GPS packets use `type: "GPS"` plus numeric `latitude` and `longitude`. The backe
 
 ### Vercel frontend
 
-- Import this repository in Vercel.
-- Set Root Directory to `frontend`.
+- Import this repository in Vercel with Root Directory set to the repository root (`.`). The root `vercel.json` builds the workspace and serves `frontend/dist` with SPA routing.
 - Set `VITE_API_URL=https://<your-railway-api-domain>`.
 
 ### Railway backend
