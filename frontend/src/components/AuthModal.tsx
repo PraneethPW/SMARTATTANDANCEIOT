@@ -85,7 +85,8 @@ export default function AuthModal({ open, initialMode = 'login', portalRole, onC
                   <label>Section<input name="section" required placeholder="A" /></label>
                   <label>Assigned bus<select name="busCode" required defaultValue=""><option value="" disabled>Select your registered bus</option>{buses.map((bus) => <option key={bus.code} value={bus.code}>{bus.code} · {bus.route_name}</option>)}</select></label>
                   {!buses.length && <div className="form-error">No campus buses are registered yet. Ask the transport office to add your bus first.</div>}
-                  <div className="form-pair"><label>Parent name (optional)<input name="parentName" placeholder="As recorded by campus" /></label><label>Parent contact (optional)<input name="parentContact" type="tel" placeholder="Contact number" /></label></div>
+                  <div className="form-pair"><label>Parent name (optional)<input name="parentName" minLength={2} placeholder="As recorded by campus" /></label><label>Parent contact (optional)<input name="parentContact" type="tel" minLength={6} placeholder="Contact number" /></label></div>
+                  <small className="registration-help">Enter both parent fields to let a parent register and follow this student.</small>
                 </>}
                 {mode === 'signup' && portalRole === 'PARENT' && <label>Parent contact on student record<input name="parentContact" type="tel" required minLength={6} placeholder="Contact number on file" /></label>}
                 <label>Password<div className="password-field"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={mode === 'login' ? 1 : 10} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="••••••••••" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>

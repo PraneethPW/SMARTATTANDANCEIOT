@@ -124,7 +124,8 @@ app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
     busCode: z.string().trim().min(2).max(20),
     parentName: z.string().trim().max(100).optional(),
     parentContact: z.string().trim().max(40).optional(),
-  }).parse(req.body);
+  }).refine((value) => !value.parentName && !value.parentContact || !!value.parentName && value.parentName.length >= 2 && !!value.parentContact && value.parentContact.length >= 6,
+    { message: 'Enter both parent name and contact to enable parent registration' }).parse(req.body);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -137,7 +138,8 @@ app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
     const existing = await client.query<{
       id: string; name: string; rfid_uid: string; department: string; academic_year: number;
       section: string; assigned_bus_id: string | null; active: boolean;
-    }>('SELECT id, name, rfid_uid, department, academic_year, section, assigned_bus_id, active FROM students WHERE registration_number=$1 FOR UPDATE', [input.registrationNumber]);
+      parent_name: string | null; parent_contact: string | null;
+    }>('SELECT id, name, rfid_uid, department, academic_year, section, assigned_bus_id, active, parent_name, parent_contact FROM students WHERE registration_number=$1 FOR UPDATE', [input.registrationNumber]);
     let studentId = existing.rows[0]?.id;
     if (existing.rows[0]) {
       const student = existing.rows[0];
@@ -151,6 +153,9 @@ app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
         return res.status(409).json({ error: 'This student already has an account. Sign in or contact your administrator.' });
       }
       if (!student.assigned_bus_id) await client.query('UPDATE students SET assigned_bus_id=$1 WHERE id=$2', [bus.rows[0].id, studentId]);
+      if (!student.parent_name && !student.parent_contact && input.parentName && input.parentContact) {
+        await client.query('UPDATE students SET parent_name=$1,parent_contact=$2 WHERE id=$3', [input.parentName, input.parentContact, studentId]);
+      }
     } else {
       const created = await client.query<{ id: string }>(`INSERT INTO students
         (registration_number, rfid_uid, name, department, academic_year, section, parent_name, parent_contact, assigned_bus_id)
