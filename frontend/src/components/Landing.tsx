@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import {
-  ArrowRight, BrainCircuit, BusFront, Fingerprint, MapPin, RadioTower,
+  ArrowRight, BrainCircuit, BusFront, Fingerprint, GraduationCap, MapPin, RadioTower, Users,
   Radar, ScanLine, ShieldCheck, Signal, Sparkles,
 } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -105,7 +105,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
     <main className="landing-shell" ref={root}>
       <nav className="landing-nav">
         <a href="#top" className="brand"><span className="brand-mark"><BusFront size={18} /></span><span>TransitSync <b>AI</b></span></a>
-        <div className="nav-links"><a href="#system">Live chain</a><a href="#intelligence">Intelligence</a><a href="#trust">Trust</a></div>
+        <div className="nav-links"><a href="#system">Live chain</a><a href="/student">Students</a><a href="/parent">Parents</a><a href="#trust">Trust</a></div>
         <button className="button button-compact button-ghost" onClick={onEnter}>Open control center <ArrowRight size={15} /></button>
       </nav>
 
@@ -142,6 +142,12 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
         </motion.div>
 
         <div className="hero-scroll-rail"><span>SCROLL TO FOLLOW THE EVENT</span><i /></div>
+      </section>
+
+      <section className="portal-discovery" aria-label="Role dashboards">
+        <div><span className="section-kicker">ONE CONNECTED CAMPUS</span><h2>Your view of the journey.</h2><p>Students and parents have their own secure dashboards, connected to the same live bus and attendance records.</p></div>
+        <a href="/student"><GraduationCap size={25}/><span><strong>Student dashboard</strong><small>Journey, timetable, attendance</small></span><ArrowRight size={20}/></a>
+        <a href="/parent"><Users size={25}/><span><strong>Parent dashboard</strong><small>Linked children and campus updates</small></span><ArrowRight size={20}/></a>
       </section>
 
       <section id="system" className="scroll-story">

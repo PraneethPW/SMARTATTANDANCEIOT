@@ -29,7 +29,7 @@ The API runs locally on `http://localhost:8081` and applies the idempotent SQL s
 
 ## Student and parent portals
 
-Administrators can create student and parent accounts from **Registry → Add user**. Select the account role and a registered student; the account is linked to that student before it can access the portal. To show multiple children in one parent account, use **Registry → Link child**. Share the login credentials securely with the account holder. Student and parent accounts sign in through the existing landing page and open their own role-specific dashboard.
+The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Each page opens role-aware sign-in. Administrators manage access under **Portals** in the operations dashboard: register the student in **Registry**, create a student or parent account linked to that registration, then share its credentials securely with the account holder. **Link another child** adds another student to an existing parent account. Student and parent accounts open their own role-specific dashboards after sign-in; an administrator account remains in operations.
 
 Both portals display the linked student's class timetable, assigned bus and route, RFID boarding history, and attendance. A bus scan is evidence of boarding; it does not itself mark academic attendance. Arrival at the campus geofence creates provisional attendance for a matched timetable session, and faculty verification updates the status shown in the portals. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
 
@@ -71,7 +71,7 @@ GPS packets use `type: "GPS"` plus numeric `latitude` and `longitude`. The backe
 - Generate a public domain and place that origin in `CORS_ORIGINS`.
 - Set the same Railway URL as `OPENROUTER_SITE_URL`.
 
-Railway uses the included `Dockerfile` and `/health` endpoint. Vercel uses `frontend/vercel.json` for SPA routing and security headers.
+Railway uses the included `Dockerfile` and `/health` endpoint. Vercel uses the root `vercel.json` for SPA routing and security headers.
 
 ## Security model
 

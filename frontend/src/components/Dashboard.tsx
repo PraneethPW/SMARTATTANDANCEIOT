@@ -12,8 +12,9 @@ import {
 import { io } from 'socket.io-client';
 import { api, API_URL, type Session } from '../api';
 import type { Analytics, Attendance, Bus, DeviceEvent, Student } from '../types';
+import PortalManagement from './PortalManagement';
 
-type Tab = 'overview' | 'live' | 'attendance' | 'registry' | 'ai';
+type Tab = 'overview' | 'live' | 'attendance' | 'registry' | 'portals' | 'ai';
 type Toast = { id: number; kind: 'success' | 'error' | 'live'; text: string };
 type Timetable = { id: string; department: string; academic_year: number; section: string; weekday: number; starts_at: string; ends_at: string; subject_code: string; subject_name: string; faculty_name?: string };
 
@@ -23,6 +24,7 @@ const nav = [
   { id: 'live', label: 'Live fleet', icon: Radar },
   { id: 'attendance', label: 'Attendance', icon: Fingerprint },
   { id: 'registry', label: 'Registry', icon: Database },
+  { id: 'portals', label: 'Portals', icon: Users },
   { id: 'ai', label: 'AI analysis', icon: Bot },
 ] as const;
 
@@ -38,6 +40,8 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [panel, setPanel] = useState<'bus' | 'student' | 'timetable' | 'user' | 'link' | null>(null);
+  const [newUserRole, setNewUserRole] = useState<'FACULTY' | 'STUDENT' | 'PARENT'>('FACULTY');
+  const [portalRefreshKey, setPortalRefreshKey] = useState(0);
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
 
   const toast = useCallback((text: string, kind: Toast['kind'] = 'success') => {
@@ -89,7 +93,7 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
         <div className="workspace-chip"><div className="workspace-avatar">KA</div><div><span>Workspace</span><strong>Smart Campus</strong></div><ChevronRight size={15} /></div>
         <nav className="side-nav">
           <span className="side-label">COMMAND</span>
-          {nav.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMobileNav(false); }}><Icon size={18} /><span>{label}</span>{id === 'attendance' && analytics?.totals.awaiting_review ? <i>{analytics.totals.awaiting_review}</i> : null}</button>)}
+          {nav.filter((item) => item.id !== 'portals' || session.user.role === 'ADMIN').map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMobileNav(false); }}><Icon size={18} /><span>{label}</span>{id === 'attendance' && analytics?.totals.awaiting_review ? <i>{analytics.totals.awaiting_review}</i> : null}</button>)}
         </nav>
         <div className={`sidebar-system connection-${socketStatus}`}><div><span className="live-dot" /><strong>{socketStatus === 'live' ? 'Realtime connected' : socketStatus === 'connecting' ? 'Reconnecting…' : 'Realtime offline'}</strong></div><p>{socketStatus === 'live' ? 'Authenticated socket channel active' : 'REST remains available while socket retries'}</p></div>
         <button className="profile-card" onClick={onLogout}><span><CircleUserRound size={20} /></span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><LogOut size={16} /></button>
@@ -107,7 +111,8 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
           {tab === 'overview' && analytics ? <Overview analytics={analytics} buses={buses} events={events} unresolved={unresolved} onNavigate={setTab} /> : null}
           {tab === 'live' ? <LiveFleet buses={buses} events={events} canOperate={roleCanOperate} onOpenBus={() => setPanel('bus')} onRefresh={() => void refresh(true)} toast={toast} token={session.token} /> : null}
           {tab === 'attendance' ? <AttendanceView rows={attendance} canVerify={roleCanVerify} token={session.token} toast={toast} onRefresh={() => void refresh(true)} /> : null}
-          {tab === 'registry' ? <Registry students={students} timetables={timetables} buses={buses} canManageUsers={session.user.role === 'ADMIN'} canManageStudents={roleCanOperate} canManageTimetables={roleCanVerify} onOpen={setPanel} /> : null}
+          {tab === 'registry' ? <Registry students={students} timetables={timetables} buses={buses} canManageUsers={session.user.role === 'ADMIN'} canManageStudents={roleCanOperate} canManageTimetables={roleCanVerify} onOpen={(next) => { if (next === 'user') setNewUserRole('FACULTY'); setPanel(next); }} /> : null}
+          {tab === 'portals' && session.user.role === 'ADMIN' ? <PortalManagement token={session.token} refreshKey={portalRefreshKey} onCreate={(role) => { setNewUserRole(role); setPanel('user'); }} onLink={() => setPanel('link')} /> : null}
           {tab === 'ai' ? <AiAnalysis token={session.token} analytics={analytics} /> : null}
         </div>
       </main>
@@ -115,8 +120,8 @@ export default function Dashboard({ session, onLogout }: { session: Session; onL
       {panel === 'bus' ? <BusPanel token={session.token} onClose={() => setPanel(null)} onCreated={(message) => { setPanel(null); toast(message); void refresh(true); }} /> : null}
       {panel === 'student' ? <StudentPanel token={session.token} buses={buses} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); toast('Student registered'); void refresh(true); }} /> : null}
       {panel === 'timetable' ? <TimetablePanel token={session.token} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); toast('Timetable session saved'); void refresh(true); }} /> : null}
-      {panel === 'user' ? <UserPanel token={session.token} students={students} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); toast('Account created and linked'); void refresh(true); }} /> : null}
-      {panel === 'link' ? <LinkChildPanel token={session.token} students={students} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); toast('Student linked to parent'); }} /> : null}
+      {panel === 'user' ? <UserPanel token={session.token} students={students} initialRole={newUserRole} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); setPortalRefreshKey((value) => value + 1); toast('Account created and linked'); void refresh(true); }} /> : null}
+      {panel === 'link' ? <LinkChildPanel token={session.token} students={students} onClose={() => setPanel(null)} onCreated={() => { setPanel(null); setPortalRefreshKey((value) => value + 1); toast('Student linked to parent'); }} /> : null}
       <div className="toast-stack">{toasts.map((item) => <motion.div initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} key={item.id} className={`toast toast-${item.kind}`}>{item.kind === 'error' ? <AlertTriangle size={17} /> : item.kind === 'live' ? <Activity size={17} /> : <Check size={17} />}{item.text}</motion.div>)}</div>
     </div>
   );
@@ -233,7 +238,19 @@ function StudentPanel({token,buses,onClose,onCreated}:{token:string;buses:Bus[];
 
 function TimetablePanel({token,onClose,onCreated}:{token:string;onClose:()=>void;onCreated:()=>void}){const [error,setError]=useState('');const [busy,setBusy]=useState(false);const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);const d=new FormData(e.currentTarget);try{await api('/api/timetables',{method:'POST',body:JSON.stringify({department:d.get('department'),academicYear:Number(d.get('academicYear')),section:d.get('section'),weekday:Number(d.get('weekday')),startsAt:d.get('startsAt'),endsAt:d.get('endsAt'),subjectCode:d.get('subjectCode'),subjectName:d.get('subjectName')})},token);onCreated();}catch(err){setError(err instanceof Error?err.message:'Could not save timetable');}finally{setBusy(false);}};return <Panel title="Add timetable session" subtitle="Arrival matching selects the next session for each class." onClose={onClose}><FormShell onSubmit={submit} error={error} busy={busy} button="Save session"><div className="form-pair"><label>Department<input name="department" required placeholder="CSE"/></label><label>Year<input name="academicYear" type="number" min="1" max="8" required/></label></div><label>Section<input name="section" required placeholder="A"/></label><label>Weekday<select name="weekday">{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d,i)=><option key={d} value={i}>{d}</option>)}</select></label><div className="form-pair"><label>Starts<input name="startsAt" type="time" required/></label><label>Ends<input name="endsAt" type="time" required/></label></div><label>Subject code<input name="subjectCode" required placeholder="CSE301"/></label><label>Subject name<input name="subjectName" required placeholder="Machine Learning"/></label></FormShell></Panel>}
 
-function UserPanel({token,students,onClose,onCreated}:{token:string;students:Student[];onClose:()=>void;onCreated:()=>void}){const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [role,setRole]=useState('FACULTY');const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError('');const d=new FormData(e.currentTarget);try{await api('/api/users',{method:'POST',body:JSON.stringify({name:d.get('name'),email:d.get('email'),password:d.get('password'),role,registrationNumber:d.get('registrationNumber')||undefined})},token);onCreated();}catch(err){setError(err instanceof Error?err.message:'Could not create account');}finally{setBusy(false);}};return <Panel title="Add account" subtitle="Create a role-scoped login. Student and parent accounts require a registered student link." onClose={onClose}><FormShell onSubmit={submit} error={error} busy={busy} button="Create secure account"><label>Full name<input name="name" required minLength={2}/></label><label>Email address<input name="email" type="email" required/></label><label>Temporary password<input name="password" type="password" required minLength={10}/></label><label>Role<select name="role" value={role} onChange={e=>setRole(e.target.value)}><option value="FACULTY">Faculty</option><option value="TRANSPORT">Transport operator</option><option value="ADMIN">Administrator</option><option value="STUDENT">Student</option><option value="PARENT">Parent</option></select></label>{(role==='STUDENT'||role==='PARENT')&&<label>Linked student<select name="registrationNumber" required defaultValue=""><option value="">Select a registered student</option>{students.filter(s=>s.active).map(s=><option key={s.id} value={s.registration_number}>{s.name} · {s.registration_number}</option>)}</select></label>}</FormShell></Panel>}
+function UserPanel({token,students,initialRole,onClose,onCreated}:{token:string;students:Student[];initialRole:'FACULTY'|'STUDENT'|'PARENT';onClose:()=>void;onCreated:()=>void}){
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [role,setRole]=useState<string>(initialRole);
+  const submit=async(e:FormEvent<HTMLFormElement>)=>{
+    e.preventDefault();setBusy(true);setError('');
+    const d=new FormData(e.currentTarget);
+    try{await api('/api/users',{method:'POST',body:JSON.stringify({name:d.get('name'),email:d.get('email'),password:d.get('password'),role,registrationNumber:d.get('registrationNumber')||undefined})},token);onCreated();}
+    catch(err){setError(err instanceof Error?err.message:'Could not create account');}
+    finally{setBusy(false);}
+  };
+  return <Panel title="Add account" subtitle="Create a role-scoped login. Student and parent accounts require a registered student link." onClose={onClose}><FormShell onSubmit={submit} error={error} busy={busy} button="Create secure account"><label>Full name<input name="name" required minLength={2}/></label><label>Email address<input name="email" type="email" required/></label><label>Temporary password<input name="password" type="password" required minLength={10}/></label><label>Role<select name="role" value={role} onChange={e=>setRole(e.target.value)}><option value="FACULTY">Faculty</option><option value="TRANSPORT">Transport operator</option><option value="ADMIN">Administrator</option><option value="STUDENT">Student</option><option value="PARENT">Parent</option></select></label>{(role==='STUDENT'||role==='PARENT')&&<label>Linked student<select name="registrationNumber" required defaultValue=""><option value="">Select a registered student</option>{students.filter(s=>s.active).map(s=><option key={s.id} value={s.registration_number}>{s.name} · {s.registration_number}</option>)}</select></label>}</FormShell></Panel>;
+}
 
 function LinkChildPanel({token,students,onClose,onCreated}:{token:string;students:Student[];onClose:()=>void;onCreated:()=>void}){
   const [parents,setParents]=useState<Array<{id:string;name:string;email:string}>>([]);

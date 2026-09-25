@@ -3,9 +3,9 @@ import { ArrowLeft, BusFront, Eye, EyeOff, LoaderCircle, LockKeyhole, ShieldChec
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type Session } from '../api';
 
-type Props = { open: boolean; onClose: () => void; onAuthenticated: (session: Session) => void };
+type Props = { open: boolean; portalRole?: 'STUDENT' | 'PARENT' | null; onClose: () => void; onAuthenticated: (session: Session) => void };
 
-export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
+export default function AuthModal({ open, portalRole, onClose, onAuthenticated }: Props) {
   const [initialized, setInitialized] = useState<boolean | null>(null);
   const [mode, setMode] = useState<'login' | 'signup' | 'bootstrap'>('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -54,9 +54,9 @@ export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
             <div className="auth-form-panel">
               <button className="back-link" onClick={onClose}><ArrowLeft size={15} /> Back to experience</button>
               <div className="auth-heading">
-                <span>{mode === 'bootstrap' ? 'FIRST-RUN SETUP' : mode === 'signup' ? 'JOIN THE LIVE OPERATION' : 'CONTROL CENTER'}</span>
-                <h3>{mode === 'bootstrap' ? 'Initialize workspace' : mode === 'signup' ? 'Create your account' : 'Welcome back'}</h3>
-                <p>{mode === 'bootstrap' ? 'Create the first administrator. Setup closes automatically afterward.' : mode === 'signup' ? 'Register as faculty or transport staff. Administrator access remains invite-only.' : 'Sign in with your institutional account.'}</p>
+                <span>{mode === 'bootstrap' ? 'FIRST-RUN SETUP' : mode === 'signup' ? 'JOIN THE LIVE OPERATION' : portalRole ? `${portalRole} PORTAL` : 'CONTROL CENTER'}</span>
+                <h3>{mode === 'bootstrap' ? 'Initialize workspace' : mode === 'signup' ? 'Create your account' : portalRole ? `Open your ${portalRole.toLowerCase()} dashboard` : 'Welcome back'}</h3>
+                <p>{mode === 'bootstrap' ? 'Create the first administrator. Setup closes automatically afterward.' : mode === 'signup' ? 'Register as faculty or transport staff. Administrator access remains invite-only.' : portalRole ? 'Sign in with the account linked to your student registration. Your campus administrator provides access.' : 'Sign in with your institutional account.'}</p>
               </div>
               <form onSubmit={submit}>
                 {(mode === 'bootstrap' || mode === 'signup') && <label>{mode === 'bootstrap' ? 'Administrator name' : 'Full name'}<input name="name" required minLength={2} placeholder="Your full name" autoComplete="name" /></label>}
@@ -64,8 +64,8 @@ export default function AuthModal({ open, onClose, onAuthenticated }: Props) {
                 {mode === 'signup' && <label>Account type<select name="role" defaultValue="FACULTY"><option value="FACULTY">Faculty member</option><option value="TRANSPORT">Transport operator</option></select></label>}
                 <label>Password<div className="password-field"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={mode === 'login' ? 1 : 10} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="••••••••••" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
                 {error && <div className="form-error">{error}</div>}
-                <button className="button button-primary auth-submit" disabled={busy || initialized === null}>{busy ? <LoaderCircle className="spin" size={18} /> : null}{mode === 'bootstrap' ? 'Create secure workspace' : mode === 'signup' ? 'Create account & continue' : 'Enter control center'}</button>
-                {initialized && mode !== 'bootstrap' && <div className="auth-switch"><span>{mode === 'login' ? 'New to TransitSync?' : 'Already have an account?'}</span><button type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Sign in instead'}</button></div>}
+                <button className="button button-primary auth-submit" disabled={busy || initialized === null}>{busy ? <LoaderCircle className="spin" size={18} /> : null}{mode === 'bootstrap' ? 'Create secure workspace' : mode === 'signup' ? 'Create account & continue' : portalRole ? `Open ${portalRole.toLowerCase()} dashboard` : 'Enter control center'}</button>
+                {initialized && mode !== 'bootstrap' && !portalRole && <div className="auth-switch"><span>{mode === 'login' ? 'New to TransitSync?' : 'Already have an account?'}</span><button type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Sign in instead'}</button></div>}
               </form>
             </div>
           </motion.div>

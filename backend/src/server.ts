@@ -165,7 +165,12 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
 app.get('/api/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
 
 app.get('/api/users', requireAuth, allowRoles('ADMIN'), asyncRoute(async (_req, res) => {
-  const result = await pool.query('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC');
+  const result = await pool.query(`SELECT u.id, u.name, u.email, u.role, u.created_at,
+    COALESCE(json_agg(json_build_object('id', s.id, 'name', s.name, 'registrationNumber', s.registration_number))
+      FILTER (WHERE s.id IS NOT NULL), '[]'::json) AS linked_students
+    FROM users u LEFT JOIN student_user_links l ON l.user_id=u.id
+    LEFT JOIN students s ON s.id=l.student_id AND s.active=true
+    GROUP BY u.id ORDER BY u.created_at DESC`);
   res.json({ users: result.rows });
 }));
 
