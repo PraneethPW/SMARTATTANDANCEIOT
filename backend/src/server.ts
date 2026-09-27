@@ -17,7 +17,7 @@ import {
   isDwellSatisfied,
   normalizeRfid,
 } from './domain.js';
-import { matchesParentClaim, matchesStudentClaim } from './registration.js';
+import { matchesParentClaim, matchesStudentClaim, normalizeParentMobile } from './registration.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -123,9 +123,9 @@ app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
     section: z.string().trim().min(1).max(12),
     busCode: z.string().trim().min(2).max(20),
     parentName: z.string().trim().max(100).optional(),
-    parentContact: z.string().trim().max(40).optional(),
-  }).refine((value) => !value.parentName && !value.parentContact || !!value.parentName && value.parentName.length >= 2 && !!value.parentContact && value.parentContact.length >= 6,
-    { message: 'Enter both parent name and contact to enable parent registration' }).parse(req.body);
+    parentContact: z.string().trim().max(40).refine((value) => !value || normalizeParentMobile(value).length >= 6,
+      { message: 'Enter a valid parent mobile number' }).optional(),
+  }).parse(req.body);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -153,9 +153,8 @@ app.post('/api/auth/student-signup', asyncRoute(async (req, res) => {
         return res.status(409).json({ error: 'This student already has an account. Sign in or contact your administrator.' });
       }
       if (!student.assigned_bus_id) await client.query('UPDATE students SET assigned_bus_id=$1 WHERE id=$2', [bus.rows[0].id, studentId]);
-      if (!student.parent_name && !student.parent_contact && input.parentName && input.parentContact) {
-        await client.query('UPDATE students SET parent_name=$1,parent_contact=$2 WHERE id=$3', [input.parentName, input.parentContact, studentId]);
-      }
+      if (!student.parent_name && input.parentName) await client.query('UPDATE students SET parent_name=$1 WHERE id=$2', [input.parentName, studentId]);
+      if (!student.parent_contact && input.parentContact) await client.query('UPDATE students SET parent_contact=$1 WHERE id=$2', [input.parentContact, studentId]);
     } else {
       const created = await client.query<{ id: string }>(`INSERT INTO students
         (registration_number, rfid_uid, name, department, academic_year, section, parent_name, parent_contact, assigned_bus_id)
@@ -189,12 +188,12 @@ app.post('/api/auth/parent-signup', asyncRoute(async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const found = await client.query<{ id: string; parent_name: string | null; parent_contact: string | null }>(
-      'SELECT id,parent_name,parent_contact FROM students WHERE registration_number=$1 AND active=true FOR UPDATE', [input.registrationNumber]);
+    const found = await client.query<{ id: string; parent_contact: string | null }>(
+      'SELECT id,parent_contact FROM students WHERE UPPER(TRIM(registration_number))=UPPER($1) AND active=true ORDER BY (registration_number=$1) DESC LIMIT 1 FOR UPDATE', [input.registrationNumber]);
     const student = found.rows[0];
     if (!student || !matchesParentClaim(student, input)) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Parent details do not match the student record. Contact your administrator.' });
+      return res.status(409).json({ error: 'Student registration number or parent mobile number does not match an active student record. Contact your administrator.' });
     }
     const passwordHash = await bcrypt.hash(input.password, 12);
     const created = await client.query<{ id: string; name: string; email: string; role: 'PARENT' }>(
@@ -276,11 +275,11 @@ app.post('/api/portal/link-child', requireAuth, allowRoles('PARENT'), asyncRoute
     registrationNumber: z.string().trim().min(2).max(40),
     parentContact: z.string().trim().min(6).max(40),
   }).parse(req.body);
-  const found = await pool.query<{ id: string; parent_name: string | null; parent_contact: string | null }>(
-    'SELECT id,parent_name,parent_contact FROM students WHERE registration_number=$1 AND active=true', [input.registrationNumber]);
+  const found = await pool.query<{ id: string; parent_contact: string | null }>(
+    'SELECT id,parent_contact FROM students WHERE UPPER(TRIM(registration_number))=UPPER($1) AND active=true ORDER BY (registration_number=$1) DESC LIMIT 1', [input.registrationNumber]);
   const student = found.rows[0];
-  if (!student || !matchesParentClaim(student, { name: req.user!.name, parentContact: input.parentContact })) {
-    return res.status(409).json({ error: 'Parent details do not match the student record. Contact your administrator.' });
+  if (!student || !matchesParentClaim(student, input)) {
+    return res.status(409).json({ error: 'Student registration number or parent mobile number does not match an active student record. Contact your administrator.' });
   }
   const linked = await pool.query(`INSERT INTO student_user_links (user_id,student_id,relationship)
     VALUES ($1,$2,'PARENT') ON CONFLICT DO NOTHING RETURNING student_id`, [req.user!.id, student.id]);

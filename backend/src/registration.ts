@@ -18,9 +18,15 @@ export function matchesStudentClaim(student: ExistingStudent, input: StudentClai
     (!student.assigned_bus_id || student.assigned_bus_id === busId);
 }
 
-export function matchesParentClaim(student: { parent_name: string | null; parent_contact: string | null }, input: { name: string; parentContact: string }) {
-  const contact = (value: string) => value.replace(/\D/g, '');
-  return !!student.parent_name && !!student.parent_contact &&
-    student.parent_name.trim().toLowerCase() === input.name.trim().toLowerCase() &&
-    contact(student.parent_contact) === contact(input.parentContact);
+export function normalizeParentMobile(value: string) {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits;
+}
+
+export function matchesParentClaim(student: { parent_contact: string | null }, input: { parentContact: string }) {
+  if (!student.parent_contact) return false;
+  const recorded = normalizeParentMobile(student.parent_contact);
+  return recorded.length >= 6 && recorded === normalizeParentMobile(input.parentContact);
 }

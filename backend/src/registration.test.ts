@@ -16,9 +16,14 @@ test('student can claim only the matching card, class, and bus', () => {
   assert.equal(matchesStudentClaim({ ...student, active: false }, claim, 'bus-1'), false);
 });
 
-test('parent claim requires the recorded name and contact', () => {
+test('parent claim uses only the recorded mobile number', () => {
   const parent = { parent_name: 'Meera Rao', parent_contact: '+91 98765 43210' };
-  assert.equal(matchesParentClaim(parent, { name: 'meera rao', parentContact: '919876543210' }), true);
-  assert.equal(matchesParentClaim(parent, { name: 'Meera Rao', parentContact: '919876543211' }), false);
-  assert.equal(matchesParentClaim({ ...parent, parent_contact: null }, { name: 'Meera Rao', parentContact: '919876543210' }), false);
+  assert.equal(matchesParentClaim(parent, { parentContact: '98765 43210' }), true);
+  assert.equal(matchesParentClaim(parent, { parentContact: '09876543210' }), true);
+  assert.equal(matchesParentClaim(parent, { parentContact: '919876543210' }), true);
+  const differentName = { ...parent, parent_name: 'Someone Else' };
+  assert.equal(matchesParentClaim(differentName, { parentContact: '9876543210' }), true);
+  assert.equal(matchesParentClaim(parent, { parentContact: '9876543211' }), false);
+  assert.equal(matchesParentClaim({ ...parent, parent_contact: null }, { parentContact: '9876543210' }), false);
+  assert.equal(matchesParentClaim({ parent_contact: '------' }, { parentContact: '------' }), false);
 });
