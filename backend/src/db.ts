@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import pg from 'pg';
 import { config } from './config.js';
+import { retryWithBackoff } from './startup.js';
 
 const { Pool } = pg;
 
@@ -29,5 +30,15 @@ export async function initializeDatabase() {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const schemaPath = path.resolve(currentDir, '../sql/schema.sql');
   const schema = await readFile(schemaPath, 'utf8');
-  await pool.query(schema);
+  await retryWithBackoff(() => pool.query(schema), {
+    attempts: 8,
+    initialDelayMs: 1_000,
+    maxDelayMs: 15_000,
+    onRetry: (error, attempt, delayMs) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Database initialization attempt ${attempt} failed (${message}); retrying in ${delayMs}ms`,
+      );
+    },
+  });
 }
