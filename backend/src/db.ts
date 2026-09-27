@@ -31,7 +31,7 @@ export async function initializeDatabase() {
   const schemaPath = path.resolve(currentDir, '../sql/schema.sql');
   const schema = await readFile(schemaPath, 'utf8');
   await retryWithBackoff(() => pool.query(schema), {
-    attempts: 8,
+    attempts: 6,
     initialDelayMs: 1_000,
     maxDelayMs: 15_000,
     onRetry: (error, attempt, delayMs) => {
