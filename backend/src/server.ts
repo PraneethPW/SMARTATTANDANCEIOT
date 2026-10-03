@@ -1364,7 +1364,11 @@ app.post(
         WHERE created_at > now() - interval '30 days' GROUP BY status
       ) x),
       'bus_attendance', (SELECT json_agg(x) FROM (SELECT ba.status,count(*)::int AS count FROM bus_attendance ba JOIN trips t ON t.id=ba.trip_id WHERE t.started_at>now()-interval '30 days' GROUP BY ba.status) x),
-      'fleet_utilisation', (SELECT json_agg(x) FROM (SELECT capacity,(SELECT count(*)::int FROM students s WHERE s.assigned_bus_id=b.id AND s.active) AS assigned FROM buses b WHERE deleted_at IS NULL) x),
+      'fleet_utilisation', (SELECT json_agg(x) FROM (
+        SELECT capacity,assigned,capacity-assigned AS remaining,
+          round(100.0*assigned/NULLIF(capacity,0),2) AS utilisation_percent
+        FROM (SELECT capacity,(SELECT count(*)::int FROM students s WHERE s.assigned_bus_id=b.id AND s.active) AS assigned FROM buses b WHERE deleted_at IS NULL) fleet
+      ) x),
       'departments', (SELECT json_agg(x) FROM (
         SELECT s.department, COUNT(*)::int AS records,
           COUNT(*) FILTER (WHERE ar.status='PRESENT')::int AS present,
@@ -1403,7 +1407,7 @@ app.post(
             {
               role: "system",
               content:
-                "You are a transport and academic attendance analyst. Use only the aggregate data supplied. Never infer individual student behavior. Bus RFID scans alone are evidence, not completed attendance. Keep class and bus attendance separate. Clearly separate facts, risks, and recommended actions. If data is insufficient, say so. Return concise markdown.",
+                "You are a transport and academic attendance analyst. Use only the aggregate data supplied. Never infer individual student behavior. Bus RFID scans alone are evidence, not completed attendance. Keep class and bus attendance separate. LEGACY_RFID means historical card-only evidence retained during migration, not an outdated current system or verified attendance. Zero scans cannot establish that nobody travelled. Seat utilisation means assigned divided by capacity: use supplied utilisation_percent and remaining; only remaining=0 means full. Missing GPS or camera acceptance tests cannot be inferred from these aggregates. Clearly separate facts, risks, and recommended actions. If data is insufficient, say so. Return concise markdown.",
             },
             {
               role: "user",

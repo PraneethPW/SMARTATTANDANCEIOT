@@ -51,6 +51,7 @@
 - Bus deletion removes a bus from the active fleet, clears student assignments and disables its schedule. Historical trips, attendance and device evidence remain in reports. An active or arrived trip must be completed first.
 - Analytics show separate bus and class trends, seat utilisation and trip summaries. Downloaded reports include vehicle, driver, route, scheduled/actual departure, arrival/exit, assigned/present/absent/pending counts and attendance percentage.
 - AI interpretation uses anonymous database aggregates and the existing server-side OpenRouter configuration. If the AI service is unavailable, charts and numeric reports still work; the UI reports the AI failure.
+- AI prose requires review against the database metrics. Seat utilisation percentages are computed by the database and supplied explicitly to the model; the model cannot change attendance or allocations.
 - Bus history percentage excludes expected, pending and legacy evidence. Academic history excludes provisional records; the current academic percentage counts Excused as a reviewed session, matching the existing portal policy.
 
 ## Verification and limits

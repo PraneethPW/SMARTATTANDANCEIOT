@@ -104,6 +104,7 @@ export default function OperationsAnalytics({ token }: { token: string }) {
       ),
       "",
       "## AI-supported interpretation",
+      "AI interpretation requires review against the database metrics above.",
       analysis ||
         "AI interpretation has not been generated. Numeric summaries above are database aggregates.",
     ].join("\n");
@@ -288,8 +289,8 @@ export default function OperationsAnalytics({ token }: { token: string }) {
               <div>
                 <h3>AI-supported interpretation</h3>
                 <span>
-                  Anonymous aggregates only. Requires the campus AI service to
-                  be configured.
+                  Anonymous aggregates only. Review AI interpretation against
+                  the database metrics above.
                 </span>
               </div>
               <button
