@@ -100,7 +100,7 @@ export default function OperationsAnalytics({ token }: { token: string }) {
       "## Trips (last 30 days)",
       ...data.trips.map(
         (t) =>
-          `${t.code} | ${t.registration_number} | ${t.driver_name} | ${t.route_name} | Scheduled ${t.schedule_time || "not configured"} | Start ${t.started_at} | Arrival ${t.arrived_at || "not received"} | Exit ${t.completed_at || "not completed"} | Assigned ${t.assigned} | Present ${t.present} | Absent ${t.absent} | Pending ${t.pending} | Attendance ${t.attendance_percentage === null ? "n/a" : t.attendance_percentage + "%"} | ${t.status}`,
+          `${t.code} | ${t.registration_number} | ${t.driver_name} | ${t.route_name} | Scheduled ${t.schedule_time || "not configured"} | Start ${t.started_at} | Arrival ${t.arrived_at || "not received"} | Exit ${t.completed_at || (t.status === "COMPLETED" ? "not recorded" : "not completed")} | Assigned ${t.assigned} | Present ${t.present} | Absent ${t.absent} | Pending ${t.pending} | Attendance ${t.attendance_percentage === null ? "n/a" : t.attendance_percentage + "%"} | ${t.status}`,
       ),
       "",
       "## AI-supported interpretation",
@@ -266,7 +266,9 @@ export default function OperationsAnalytics({ token }: { token: string }) {
                           · Exit:{" "}
                           {t.completed_at
                             ? new Date(t.completed_at).toLocaleTimeString()
-                            : "Open"}
+                            : t.status === "COMPLETED"
+                              ? "Not recorded"
+                              : "Open"}
                         </small>
                       </td>
                       <td>{t.assigned}</td>
