@@ -1,0 +1,438 @@
+/* Operational additions use the existing dashboard palette and panels. */
+.journey-map {
+  height: 340px;
+  position: relative;
+  border: 1px solid #ffffff12;
+  border-radius: 14px;
+  overflow: hidden;
+  margin: 12px 0;
+  background: #101c2a;
+}
+.journey-map-canvas {
+  height: 340px;
+  width: 100%;
+  z-index: 1;
+}
+.journey-map .leaflet-container {
+  background: #152339;
+  font-family: inherit;
+}
+.journey-map .leaflet-popup-content-wrapper,
+.journey-map .leaflet-popup-tip {
+  background: #142236;
+  color: #e8f2ff;
+}
+.journey-map .leaflet-popup-content small {
+  display: block;
+  margin-top: 5px;
+}
+.journey-map-caption,
+.map-caption,
+.journey-map-note {
+  padding: 10px 14px;
+  color: #95a9be;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+.map-note {
+  padding: 10px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #95a9be;
+}
+.gps-bus-marker span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid #77f4d0;
+  background: #13263a;
+  color: #77f4d0;
+  font-size: 23px;
+  box-shadow: 0 2px 14px #0007;
+}
+.map-waiting {
+  padding: 9px 14px;
+  color: #ffca73;
+  font-size: 12px;
+}
+.bus-editor.side-panel {
+  position: relative;
+  margin-left: auto;
+  background: #0e1829;
+  width: min(560px, 100%);
+  height: 100vh;
+  overflow-y: auto;
+  border-left: 1px solid #ffffff15;
+  padding: 26px;
+}
+.bus-editor .panel-form label,
+.allocation-form label,
+.rfid-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: #a8b9ca;
+}
+.bus-editor .panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.bus-editor input,
+.bus-editor select,
+.bus-editor textarea,
+.allocation-form select,
+.rfid-form input {
+  padding: 12px;
+  border-radius: 9px;
+  background: #0b1423;
+  border: 1px solid #ffffff16;
+  color: #e4eef9;
+  font: inherit;
+  width: 100%;
+}
+.bus-editor .consent-line {
+  flex-direction: row;
+}
+.consent-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 16px 0;
+  font-size: 12px;
+  color: #9eb0c4;
+  line-height: 1.6;
+}
+.consent-line input {
+  width: 16px !important;
+  min-width: 16px;
+  margin-top: 3px;
+  accent-color: #77f4d0;
+}
+.weekday-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.weekday-pills button,
+.seat-grid button {
+  padding: 10px;
+  border: 1px solid #ffffff16;
+  border-radius: 8px;
+  color: #a8b9ca;
+  background: #111e30;
+}
+.weekday-pills button.active,
+.seat-grid button.selected {
+  background: #77f4d020;
+  color: #77f4d0;
+  border-color: #77f4d060;
+}
+.stop-editor {
+  border: 1px solid #ffffff16;
+  border-radius: 12px;
+  padding: 15px;
+  display: grid;
+  gap: 12px;
+}
+.stop-editor legend {
+  padding: 0 8px;
+  color: #77f4d0;
+  font-size: 12px;
+}
+.device-secret {
+  overflow-wrap: anywhere;
+  display: block;
+  padding: 16px;
+  background: #081321;
+  color: #77f4d0;
+}
+.allocation-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 7px;
+  margin: 16px 0;
+}
+.seat-grid button:disabled {
+  background: #ffffff07;
+  color: #52667b;
+  text-decoration: line-through;
+}
+.report-table-wrap {
+  overflow-x: auto;
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 690px;
+}
+.report-table th {
+  text-align: left;
+  padding: 14px 12px;
+  color: #859bb2;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.report-table td {
+  padding: 15px 12px;
+  border-top: 1px solid #ffffff0b;
+  color: #d9e5f2;
+  vertical-align: top;
+  line-height: 1.6;
+}
+.report-table td small {
+  display: block;
+  color: #8197ad;
+  font-size: 11px;
+}
+.report-table td strong {
+  font-weight: 500;
+}
+.class-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 0;
+  font-size: 14px;
+}
+.class-session-header p {
+  color: #94a9bd;
+  font-size: 12px;
+  margin: 10px 0;
+}
+.rfid-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 20px 0;
+}
+.rfid-form label {
+  flex: 1;
+}
+.camera-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #020813cc;
+  padding: 20px;
+  backdrop-filter: blur(8px);
+}
+.camera-dialog {
+  width: min(650px, 100%);
+  max-height: 95vh;
+  overflow-y: auto;
+  padding: 22px;
+}
+.camera-dialog video {
+  width: 100%;
+  border-radius: 12px;
+  background: #05090f;
+  margin: 16px 0;
+}
+.camera-dialog .card-head span {
+  line-height: 1.6;
+  display: block;
+}
+.enrollment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px;
+}
+.enrollment-card {
+  padding: 15px;
+  border: 1px solid #ffffff12;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.enrollment-card img {
+  width: 100%;
+  height: 165px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.enrollment-card small {
+  color: #8ca1b8;
+}
+.route-stops {
+  display: grid;
+  gap: 12px;
+  margin: 15px 0;
+}
+.route-stop {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  background: #ffffff03;
+  border-radius: 9px;
+}
+.route-stop > span {
+  color: #77f4d0;
+  background: #77f4d010;
+  border: 1px solid #77f4d030;
+  border-radius: 50%;
+  padding: 6px 10px;
+}
+.route-stop small {
+  display: block;
+  color: #8197ad;
+  margin-top: 5px;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (max-width: 650px) {
+  .journey-map,
+  .journey-map-canvas {
+    height: 290px;
+  }
+  .allocation-form {
+    grid-template-columns: 1fr;
+  }
+  .seat-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .class-session-header,
+  .rfid-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bus-editor.side-panel {
+    padding: 20px;
+  }
+  .camera-dialog {
+    padding: 15px;
+  }
+  .weekday-pills button {
+    padding: 8px;
+  }
+  .map-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+.stop-list {
+  list-style: none;
+  margin: 20px 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.stop-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-left: 2px solid #335670;
+  background: #ffffff03;
+  font-size: 13px;
+}
+.stop-list li.my-stop {
+  border-color: #77f4d0;
+  background: #77f4d007;
+}
+.stop-list li > span {
+  background: #162a3d;
+  color: #77f4d0;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+}
+.stop-list small {
+  display: block;
+  color: #8399af;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.delete-confirm {
+  max-width: 520px;
+  padding: 25px;
+}
+.delete-confirm p {
+  font-size: 13px;
+  color: #97aec5;
+  line-height: 1.7;
+  margin: 15px 0;
+}
+.metric-line {
+  padding: 18px;
+  border: 1px solid #ffffff12;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #c1d2e4;
+}
+.metric-line small {
+  display: block;
+  font-size: 12px;
+  color: #91a7bd;
+  margin-top: 8px;
+}
+.table-toolbar select {
+  background: #112037;
+  color: #d8e8f7;
+  border: 1px solid #ffffff15;
+  border-radius: 8px;
+  padding: 10px;
+  margin-left: 8px;
+}
+
+.notification-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #ffffff0c;
+  color: #dceafa;
+}
+.notification-row strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.notification-row small {
+  display: block;
+  color: #849db4;
+  font-size: 11px;
+  margin-top: 7px;
+}
+.notification-row:hover {
+  background: #ffffff03;
+}
+.gps-bus-marker {
+  transition: transform 1s linear;
+}
+.gps-bus-marker.gps-stale span {
+  border-color: #ffca73;
+  color: #ffca73;
+}

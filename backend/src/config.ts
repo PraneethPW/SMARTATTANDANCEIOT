@@ -5,6 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(8081),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  DATABASE_SCHEMA: z.string().regex(/^[a-z_][a-z0-9_]*$/).default('public'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must contain at least 32 characters'),
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
   CAMPUS_LATITUDE: z.coerce.number().min(-90).max(90),

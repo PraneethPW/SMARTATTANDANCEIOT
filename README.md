@@ -1,6 +1,8 @@
 # TransitSync AI
 
-TransitSync AI turns a real RFID boarding event into provisional academic attendance only after the bus reaches a verified campus geofence. One mixed bus manifest is split into the correct department, year, section, and timetable session for faculty review.
+TransitSync AI connects independent bus, classroom and hostel attendance with live transport operations. RFID creates pending evidence; server-side face verification completes boarding. Faculty starts classroom attendance during the timetable window and reviews the academic record. Students and parents see the same stored records.
+
+See [Operations workflow and setup](docs/OPERATIONS.md) for route/seat configuration, camera enrollment, GPS, notifications, reports and acceptance checks.
 
 ## Architecture
 
@@ -27,9 +29,9 @@ The API runs locally on `http://localhost:8081` and applies the idempotent SQL s
 
 ## Student and parent portals
 
-The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Students can register immediately with their name, registration number, RFID UID, department, year, section, and an existing bus. If a campus student record already exists, these details must match before the account can claim it. Parents register with only the child's registration number and the parent mobile number recorded on that student's active record; the parent's account name is not a matching field. Local and `+91` mobile formats are accepted. Parents can link another child from their dashboard using the same two fields. Administrators can also create linked accounts under **Portals**. An administrator account remains in operations.
+The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Students can register immediately with their name, registration number, RFID UID, department, year, section, residency, and an existing bus (optional for hostel students). If a campus student record already exists, these details must match before the account can claim it. Parents register with only the child's registration number and the parent mobile number recorded on that student's active record; the parent's account name is not a matching field. Local and `+91` mobile formats are accepted. Parents can link another child from their dashboard using the same two fields. Administrators can also create linked accounts under **Portals**. An administrator account remains in operations.
 
-Both portals display the linked student's class timetable, assigned bus and route, RFID boarding history, and attendance. A bus scan is evidence of boarding; it does not itself mark academic attendance. Arrival at the campus geofence creates provisional attendance for a matched timetable session, and faculty verification updates the status shown in the portals. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
+Both portals display the linked student's class timetable, assigned bus and route, RFID evidence, separate bus/class attendance, camera verification, GPS maps and journey notifications. A bus scan creates a pending face check; it does not mark academic attendance. Campus arrival updates the bus journey only. Faculty starts the separately scheduled class session and reviews its classroom evidence. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
 
 All roles read the same bus, trip, RFID, and attendance tables. Transport can start, confirm arrival, and complete trips; faculty sees the boarding manifest and reviews provisional attendance; students and parents see their linked journeys and records. Socket events refresh each screen immediately, with a 15-second polling fallback. Existing accounts and student records remain in place.
 
@@ -52,7 +54,7 @@ Content-Type: application/json
 }
 ```
 
-GPS packets use `type: "GPS"` plus numeric `latitude` and `longitude`. The backend performs dwell-aware Haversine geofencing, creates provisional attendance after arrival, and broadcasts every accepted event to connected dashboards.
+GPS packets use `type: "GPS"` plus numeric `latitude` and `longitude`. The backend performs dwell-aware Haversine geofencing, updates verified bus arrivals, creates boarding-point alerts, and broadcasts accepted events to connected dashboards. It never creates class attendance from bus arrival.
 
 ## Deployment
 

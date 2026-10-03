@@ -1,26 +1,64 @@
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8081';
+export const API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
+  "http://localhost:8081";
 
 export type Session = {
   token: string;
-  user: { id: string; name: string; email: string; role: 'ADMIN' | 'FACULTY' | 'TRANSPORT' | 'PARENT' | 'STUDENT' };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: "ADMIN" | "FACULTY" | "TRANSPORT" | "PARENT" | "STUDENT";
+  };
 };
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
     super(message);
   }
 }
 
-export async function api<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+export async function disconnectPush(token: string) {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
+    if (subscription) {
+      await api(
+        "/api/notifications/push",
+        {
+          method: "DELETE",
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        },
+        token,
+      ).catch(() => {});
+      await subscription.unsubscribe();
+    }
+  } catch {
+    /* Signing out still clears the local session. */
+  }
+}
+
+export async function api<T>(
+  path: string,
+  options: RequestInit = {},
+  token?: string,
+): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
-  const body = await response.json().catch(() => ({})) as { error?: string };
-  if (!response.ok) throw new ApiError(body.error || `Request failed (${response.status})`, response.status);
+  const body = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok)
+    throw new ApiError(
+      body.error || `Request failed (${response.status})`,
+      response.status,
+    );
   return body as T;
 }

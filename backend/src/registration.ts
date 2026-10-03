@@ -9,7 +9,7 @@ type StudentClaim = {
   section: string;
 };
 
-export function matchesStudentClaim(student: ExistingStudent, input: StudentClaim, busId: string) {
+export function matchesStudentClaim(student: ExistingStudent, input: StudentClaim, busId: string | null) {
   return student.active && student.name.trim().toLowerCase() === input.name.trim().toLowerCase() &&
     student.rfid_uid === normalizeRfid(input.rfidUid) &&
     student.department === input.department.trim().toUpperCase() &&
