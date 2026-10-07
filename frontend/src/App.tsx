@@ -33,19 +33,26 @@ export default function App() {
     setPath(next);
     window.scrollTo(0, 0);
   };
-  const logout = async () => {
-    if (session) await disconnectPush(session.token);
+  const logout = () => {
+    const token = session?.token;
     localStorage.removeItem("transitsync-session");
     setSession(null);
+    setAuthOpen(false);
     navigate("/");
+    if (token) void disconnectPush(token);
   };
 
   useEffect(() => {
     if (!session) return;
+    let active = true;
     api("/api/auth/me", {}, session.token).catch(() => {
+      if (!active) return;
       localStorage.removeItem("transitsync-session");
       setSession(null);
     });
+    return () => {
+      active = false;
+    };
   }, [session]);
 
   useEffect(() => {
@@ -56,13 +63,13 @@ export default function App() {
         : session.user.role === "PARENT"
           ? "/parent"
           : "/app";
-    if (window.location.pathname !== correctPath) {
+    if (path !== "/" && window.location.pathname !== correctPath) {
       window.history.replaceState({}, "", correctPath);
       setPath(correctPath);
     }
-  }, [session]);
+  }, [session, path]);
 
-  if (session)
+  if (session && path !== "/")
     return (
       <Suspense
         fallback={
@@ -72,9 +79,17 @@ export default function App() {
         }
       >
         {["PARENT", "STUDENT"].includes(session.user.role) ? (
-          <Portal session={session} onLogout={logout} />
+          <Portal
+            session={session}
+            onLogout={logout}
+            onHome={() => navigate("/")}
+          />
         ) : (
-          <Dashboard session={session} onLogout={logout} />
+          <Dashboard
+            session={session}
+            onLogout={logout}
+            onHome={() => navigate("/")}
+          />
         )}
       </Suspense>
     );
@@ -97,7 +112,18 @@ export default function App() {
         />
       ) : (
         <Landing
+          onLogout={session ? logout : undefined}
           onEnter={() => {
+            if (session) {
+              navigate(
+                session.user.role === "STUDENT"
+                  ? "/student"
+                  : session.user.role === "PARENT"
+                    ? "/parent"
+                    : "/app",
+              );
+              return;
+            }
             setAuthMode("login");
             setAuthOpen(true);
           }}

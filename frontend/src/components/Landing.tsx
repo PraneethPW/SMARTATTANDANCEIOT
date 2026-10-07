@@ -8,6 +8,7 @@ import {
   BusFront,
   Fingerprint,
   GraduationCap,
+  LogOut,
   MapPin,
   RadioTower,
   Users,
@@ -62,7 +63,13 @@ const story = [
   },
 ];
 
-export default function Landing({ onEnter }: { onEnter: () => void }) {
+export default function Landing({
+  onEnter,
+  onLogout,
+}: {
+  onEnter: () => void;
+  onLogout?: () => void;
+}) {
   const root = useRef<HTMLElement>(null);
   const hero = useRef<HTMLElement>(null);
   const [apiState, setApiState] = useState<"checking" | "online" | "offline">(
@@ -209,7 +216,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
 
   return (
     <main className="landing-shell" ref={root}>
-      <nav className="landing-nav">
+      <nav className={`landing-nav ${onLogout ? "landing-nav-signed-in" : ""}`}>
         <a href="#top" className="brand">
           <span className="brand-mark">
             <BusFront size={18} />
@@ -224,12 +231,26 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
           <a href="/parent">Parents</a>
           <a href="#trust">Trust</a>
         </div>
-        <button
-          className="button button-compact button-ghost"
-          onClick={onEnter}
-        >
-          Open control center <ArrowRight size={15} />
-        </button>
+        <div className="landing-account-actions">
+          <button
+            className="button button-compact button-ghost"
+            onClick={onEnter}
+            title={
+              onLogout ? "Return to your dashboard" : "Open control center"
+            }
+          >
+            <span>{onLogout ? "Dashboard" : "Open control center"}</span>
+            <ArrowRight size={15} aria-hidden="true" />
+          </button>
+          {onLogout && (
+            <button
+              className="button button-compact button-ghost"
+              onClick={onLogout}
+            >
+              <LogOut size={15} aria-hidden="true" /> <span>Sign out</span>
+            </button>
+          )}
+        </div>
       </nav>
 
       <section

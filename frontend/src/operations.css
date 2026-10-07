@@ -436,3 +436,93 @@ button:disabled {
   border-color: #ffca73;
   color: #ffca73;
 }
+.sidebar-brand-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.dashboard-navigation,
+.landing-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dashboard-navigation button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #dce7f4;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.dashboard-navigation button:hover {
+  background: rgba(121, 243, 208, 0.08);
+  border-color: rgba(121, 243, 208, 0.3);
+}
+.dashboard-navigation button:focus-visible,
+.sidebar-brand-link:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 3px;
+}
+@media (max-width: 1100px) {
+  .dashboard-header-navigation {
+    height: auto;
+    min-height: 82px;
+    padding: 14px 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .dashboard-header-navigation > div:first-of-type {
+    flex: 1;
+  }
+  .dashboard-header-navigation .header-actions {
+    width: 100%;
+  }
+  .dashboard-navigation {
+    flex: 1;
+  }
+  .dashboard-navigation button {
+    flex: 1;
+  }
+}
+@media (max-width: 600px) {
+  .dashboard-header-navigation {
+    padding: 12px 14px;
+  }
+  .dashboard-header-navigation .header-actions {
+    gap: 8px;
+  }
+  .dashboard-header-navigation .header-avatar {
+    display: none;
+  }
+  .dashboard-navigation {
+    gap: 6px;
+  }
+  .dashboard-navigation button {
+    padding: 0 8px;
+  }
+  .landing-nav-signed-in .brand > span:last-child {
+    display: none;
+  }
+  .landing-nav-signed-in .landing-account-actions .button {
+    width: auto;
+    padding: 0 10px;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .landing-nav-signed-in .landing-account-actions .button span {
+    display: inline;
+  }
+}

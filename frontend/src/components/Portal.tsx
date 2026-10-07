@@ -11,7 +11,6 @@ import {
   Fingerprint,
   GraduationCap,
   LayoutDashboard,
-  LogOut,
   Menu,
   Radar,
   RefreshCw,
@@ -41,6 +40,8 @@ import AttendanceCategories from "./AttendanceCategories";
 import Notifications from "./Notifications";
 
 import { FaceChecks, FaceEnrollment } from "./FaceVerification";
+import DashboardNavigation from "./DashboardNavigation";
+import { useDashboardNavigation } from "../useDashboardNavigation";
 
 type Student = {
   assigned_bus_id: string | null;
@@ -183,15 +184,23 @@ const time = (value: string) =>
 export default function Portal({
   session,
   onLogout,
+  onHome,
 }: {
   session: Session;
   onLogout: () => void;
+  onHome: () => void;
 }) {
   const [data, setData] = useState<PortalData | null>(null);
 
   const [selected, setSelected] = useState("");
 
-  const [tab, setTab] = useState<Tab>("overview");
+  const { tab, setTab, goBack } = useDashboardNavigation<Tab>(
+    "overview",
+    (session.user.role === "PARENT" ? parentNav : studentNav).map(
+      ({ id }) => id,
+    ),
+    onHome,
+  );
 
   const [mobileNav, setMobileNav] = useState(false);
 
@@ -293,14 +302,18 @@ export default function Portal({
     <div className="dashboard-shell portal-shell">
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="sidebar-top">
-          <div className="brand">
+          <button
+            className="brand sidebar-brand-link"
+            onClick={onHome}
+            aria-label="Home — TransitSync AI"
+          >
             <span className="brand-mark">
               <BusFront size={18} />
             </span>
             <span>
               TransitSync <b>AI</b>
             </span>
-          </div>
+          </button>
           <button
             className="icon-button mobile-only"
             onClick={() => setMobileNav(false)}
@@ -355,7 +368,7 @@ export default function Portal({
           <p>Bus and attendance changes appear here as they happen.</p>
         </div>
 
-        <button className="profile-card" onClick={onLogout}>
+        <div className="profile-card">
           <span>
             <CircleUserRound size={20} />
           </span>
@@ -363,12 +376,11 @@ export default function Portal({
             <strong>{session.user.name}</strong>
             <small>{session.user.role}</small>
           </div>
-          <LogOut size={16} />
-        </button>
+        </div>
       </aside>
 
       <main className="dashboard-main">
-        <header className="dash-header">
+        <header className="dash-header dashboard-header-navigation">
           <button
             className="icon-button mobile-only"
             onClick={() => setMobileNav(true)}
@@ -384,6 +396,11 @@ export default function Portal({
             <h1>{nav.find((item) => item.id === tab)?.label}</h1>
           </div>
           <div className="header-actions">
+            <DashboardNavigation
+              onBack={goBack}
+              onHome={onHome}
+              onLogout={onLogout}
+            />
             <button
               className="icon-button"
               onClick={() => void refresh()}
@@ -1225,7 +1242,8 @@ function RouteDetails({
                 {stop.id === boardingStop ? " · Your boarding point" : ""}
               </strong>
               <small>
-                Planned {plannedStopTime(bus.starts_at,stop.offset_minutes)} · {stop.offset_minutes} min after departure ·{" "}
+                Planned {plannedStopTime(bus.starts_at, stop.offset_minutes)} ·{" "}
+                {stop.offset_minutes} min after departure ·{" "}
                 {Number(stop.latitude).toFixed(5)},{" "}
                 {Number(stop.longitude).toFixed(5)}
               </small>

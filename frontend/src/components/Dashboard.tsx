@@ -16,7 +16,6 @@ import {
   GraduationCap,
   LayoutDashboard,
   LoaderCircle,
-  LogOut,
   MapPin,
   KeyRound,
   Menu,
@@ -74,6 +73,8 @@ import TransportReports from "./TransportReports";
 import OperationsAnalytics from "./OperationsAnalytics";
 import JourneyMap from "./JourneyMap";
 import { displayDate } from "./AttendanceCategories";
+import DashboardNavigation from "./DashboardNavigation";
+import { useDashboardNavigation } from "../useDashboardNavigation";
 
 type Tab =
   | "overview"
@@ -115,11 +116,31 @@ const nav = [
 export default function Dashboard({
   session,
   onLogout,
+  onHome,
 }: {
   session: Session;
   onLogout: () => void;
+  onHome: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const visibleNav = nav.filter(({ id }) => {
+    if (session.user.role === "ADMIN") return true;
+    if (session.user.role === "FACULTY")
+      return !["portals", "buses"].includes(id);
+    return [
+      "overview",
+      "live",
+      "registry",
+      "buses",
+      "bus-attendance",
+      "verification",
+      "ai",
+    ].includes(id);
+  });
+  const { tab, setTab, goBack } = useDashboardNavigation<Tab>(
+    "overview",
+    visibleNav.map(({ id }) => id),
+    onHome,
+  );
   const [mobileNav, setMobileNav] = useState(false);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [buses, setBuses] = useState<Bus[]>([]);
@@ -254,36 +275,27 @@ export default function Dashboard({
   );
   const roleCanOperate = ["ADMIN", "TRANSPORT"].includes(session.user.role);
   const roleCanVerify = ["ADMIN", "FACULTY"].includes(session.user.role);
-  const visibleNav = nav.filter(({ id }) => {
-    if (session.user.role === "ADMIN") return true;
-    if (session.user.role === "FACULTY")
-      return !["portals", "buses"].includes(id);
-    return [
-      "overview",
-      "live",
-      "registry",
-      "buses",
-      "bus-attendance",
-      "verification",
-      "ai",
-    ].includes(id);
-  });
 
   return (
     <div className="dashboard-shell">
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="sidebar-top">
-          <div className="brand">
+          <button
+            className="brand sidebar-brand-link"
+            onClick={onHome}
+            aria-label="Home — TransitSync AI"
+          >
             <span className="brand-mark">
               <BusFront size={18} />
             </span>
             <span>
               TransitSync <b>AI</b>
             </span>
-          </div>
+          </button>
           <button
             className="icon-button mobile-only"
             onClick={() => setMobileNav(false)}
+            aria-label="Close menu"
           >
             <X size={18} />
           </button>
@@ -335,7 +347,7 @@ export default function Dashboard({
               : "REST remains available while socket retries"}
           </p>
         </div>
-        <button className="profile-card" onClick={onLogout}>
+        <div className="profile-card">
           <span>
             <CircleUserRound size={20} />
           </span>
@@ -343,15 +355,15 @@ export default function Dashboard({
             <strong>{session.user.name}</strong>
             <small>{session.user.role}</small>
           </div>
-          <LogOut size={16} />
-        </button>
+        </div>
       </aside>
 
       <main className="dashboard-main">
-        <header className="dash-header">
+        <header className="dash-header dashboard-header-navigation">
           <button
             className="icon-button mobile-only"
             onClick={() => setMobileNav(true)}
+            aria-label="Open menu"
           >
             <Menu size={20} />
           </button>
@@ -367,6 +379,11 @@ export default function Dashboard({
             <h1>{visibleNav.find((item) => item.id === tab)?.label}</h1>
           </div>
           <div className="header-actions">
+            <DashboardNavigation
+              onBack={goBack}
+              onHome={onHome}
+              onLogout={onLogout}
+            />
             <span className={`time-status connection-${socketStatus}`}>
               {socketStatus === "live" ? (
                 <Wifi size={12} />
