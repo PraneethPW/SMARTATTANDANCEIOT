@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode live",
+    "dev:local": "vite --mode development",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "preview": "vite preview"
+    "preview": "vite preview --mode live"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.6",

@@ -13,21 +13,42 @@ See [Accounts and password recovery](docs/ACCOUNTS.md) for five-role sign-in, au
 - No microSD dependency — device retries use a bounded in-memory queue in firmware; the server is idempotent and safely accepts retransmissions.
 - AI never marks attendance. OpenRouter only explains trends computed from verified database records.
 
-## Local start
+## Local start — same application as production
 
-1. Create a Neon database and copy its pooled connection string.
-2. Copy `backend/.env.example` to `backend/.env` and fill the values.
-3. Copy `frontend/.env.example` to `frontend/.env`.
-4. This repository uses pnpm. From the project root run:
+From an up-to-date clone of this repository:
 
 ```bash
-pnpm install
+git pull origin main
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-If pnpm is not installed, run `npm install -g pnpm@11.19.0` once.
+Open **http://localhost:5173**. This runs the same React application, theme, animations, five role portals and role-based controls used in production. **Open control center** offers Admin, Transport, Faculty, Student and Parent. The local frontend connects to the existing Railway API and Neon database, so existing accounts, buses and attendance match the deployed site. No backend environment file or database credentials are needed for this mode.
 
-The API runs locally on `http://localhost:8081` and applies the idempotent SQL schema automatically on startup. Open `http://localhost:5173`, choose **Initialize workspace**, and create the first administrator. This route disables itself permanently once the first account exists.
+**This mode uses live records:** registrations, attendance changes and other saved actions affect production. Sign in with an existing account's correct role. Browser sessions are separate between localhost and the deployed site, so sign in again locally.
+
+The frontend proxies API requests, health checks and Socket.IO through localhost. This avoids local CORS differences and keeps real-time updates working. Older `VITE_API_URL=http://localhost:8081` settings do not override `pnpm dev`; use the explicit local mode below when you want a local API. If port 5173 is occupied, stop the older dev server: startup fails clearly instead of silently moving to another port and leaving you on an outdated application.
+
+Direct local entries: **/admin**, **/transport**, **/faculty**, **/student**, **/parent**. These use the same entry pages and dashboards as production. Students and parents are also linked from the lower landing-page section.
+
+If pnpm is not installed, run `npm install -g pnpm@11.19.0` once. Supported Node.js versions are 20 or later.
+
+### Fully local frontend and backend
+
+Use this mode for development against your own database:
+
+1. Create a separate Neon/PostgreSQL development database.
+2. Copy `backend/.env.example` to `backend/.env` and fill its database, JWT and campus settings.
+3. Optionally copy `frontend/.env.example` to `frontend/.env`; `VITE_DEV_API_TARGET` defaults to `http://localhost:8081` and must match the backend port.
+4. Run `pnpm dev:full` from the repository root.
+
+Open **http://localhost:5173**. The local API runs at **http://localhost:8081** and applies the SQL schema on startup. A fresh database shows initial workspace setup first. Create the first Admin once; all five role login and registration options then become available. The UI/features are identical, but accounts and attendance come from your development database, so production records do not appear automatically.
+
+`pnpm --dir frontend dev:local` runs only the frontend proxy against a local API you have already started. `VITE_LIVE_API_URL` optionally changes the remote target for the default live-connected mode; it is a public API origin, never a database connection string.
+
+### Preview a production build locally
+
+Run `pnpm build`, then `pnpm preview`, and open **http://localhost:4173**. Keep `VITE_API_URL` blank for this local build so requests use the live API proxy. Vercel still supplies its configured `VITE_API_URL` when building the deployed frontend.
 
 ## Student and parent portals
 
