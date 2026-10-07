@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import {
@@ -14,14 +8,6 @@ import {
   type Role,
 } from "../roles";
 
-type Invitation = {
-  id: string;
-  email: string;
-  role: Role;
-  expires_at: string;
-  used_at: string | null;
-  revoked_at: string | null;
-};
 type Recovery = {
   id: string;
   name: string;
@@ -31,10 +17,11 @@ type Recovery = {
   requested_at: string;
 };
 type Account = { id: string; name: string; email: string; role: Role };
-type AdminRegistration = {
+type StaffRegistration = {
   id: string;
   name: string;
   email: string;
+  role: Role;
   requested_at: string;
 };
 export default function AccessManagement({
@@ -44,12 +31,9 @@ export default function AccessManagement({
   token: string;
   refreshKey: number;
 }) {
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [requests, setRequests] = useState<Recovery[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [adminRegistrations, setAdminRegistrations] = useState<
-    AdminRegistration[]
-  >([]);
+  const [registrations, setRegistrations] = useState<StaffRegistration[]>([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -69,25 +53,19 @@ export default function AccessManagement({
   }, [secret]);
   const load = useCallback(async () => {
     try {
-      const [inv, recovery, status, users, registrations] = await Promise.all([
-        api<{ invitations: Invitation[] }>(
-          "/api/access/invitations",
-          {},
-          token,
-        ),
+      const [recovery, status, users, registrations] = await Promise.all([
         api<{ requests: Recovery[] }>("/api/access/recovery", {}, token),
         api<{ emailConfigured: boolean }>("/api/access/status", {}, token),
         api<{ users: Account[] }>("/api/users", {}, token),
-        api<{ registrations: AdminRegistration[] }>(
-          "/api/access/admin-registrations",
+        api<{ registrations: StaffRegistration[] }>(
+          "/api/access/registrations",
           {},
           token,
         ),
       ]);
-      setInvitations(inv.invitations);
       setRequests(recovery.requests);
       setAccounts(users.users);
-      setAdminRegistrations(registrations.registrations);
+      setRegistrations(registrations.registrations);
       setEmailConfigured(status.emailConfigured);
       setError("");
     } catch (cause) {
@@ -117,31 +95,6 @@ export default function AccessManagement({
       setBusy(false);
     }
   };
-  const invite = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const fields = new FormData(form);
-    void run(async () => {
-      const result = await api<{ code: string; invitation: Invitation }>(
-        "/api/access/invitations",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            email: fields.get("email"),
-            role: fields.get("role"),
-            expiresHours: Number(fields.get("expiresHours")),
-          }),
-        },
-        token,
-      );
-      setSecret({
-        label: `Invitation for ${result.invitation.email} · ${roleLabels[result.invitation.role]} · expires ${new Date(result.invitation.expires_at).toLocaleString()}`,
-        value: result.code,
-      });
-      setCopied(false);
-      form.reset();
-    });
-  };
   return (
     <div className="page-stack access-management">
       <div className="page-title-row">
@@ -149,8 +102,8 @@ export default function AccessManagement({
           <span className="section-kicker">ACCOUNT ACCESS</span>
           <h2>One campus. Five roles.</h2>
           <p>
-            Invite staff and help account holders recover access after verifying
-            their identity.
+            Approve staff registrations and help account holders recover access
+            after verifying their identity.
           </p>
         </div>
         <button
@@ -227,19 +180,21 @@ export default function AccessManagement({
       <section className="dash-card">
         <div className="card-head">
           <div>
-            <h3>Admin registrations</h3>
+            <h3>Staff registrations</h3>
             <span>
               Applicants register with name, email and password. Approve campus
-              Admin access after verification.
+              Admin, Faculty or Transport access after verification.
             </span>
           </div>
           <ShieldCheck size={20} />
         </div>
         <div className="portal-list">
-          {adminRegistrations.map((request) => (
+          {registrations.map((request) => (
             <div className="access-recovery-row" key={request.id}>
               <div>
-                <strong>{request.name}</strong>
+                <strong>
+                  {request.name} · {roleLabels[request.role]}
+                </strong>
                 <small>{request.email}</small>
                 <small>
                   Requested {new Date(request.requested_at).toLocaleString()}
@@ -257,7 +212,7 @@ export default function AccessManagement({
                     }))
                   }
                 />{" "}
-                I verified this applicant for Admin access
+                I verified this applicant for {roleLabels[request.role]} access
               </label>
               <button
                 className="button button-primary button-compact"
@@ -265,7 +220,7 @@ export default function AccessManagement({
                 onClick={() =>
                   void run(async () => {
                     await api(
-                      `/api/access/admin-registrations/${request.id}/approve`,
+                      `/api/access/registrations/${request.id}/approve`,
                       {
                         method: "POST",
                         body: JSON.stringify({ identityConfirmed: true }),
@@ -276,7 +231,7 @@ export default function AccessManagement({
                   })
                 }
               >
-                Approve Admin
+                Approve {roleLabels[request.role]}
               </button>
               <button
                 className="button button-ghost button-compact"
@@ -284,7 +239,7 @@ export default function AccessManagement({
                 onClick={() =>
                   void run(async () => {
                     await api(
-                      `/api/access/admin-registrations/${request.id}/decline`,
+                      `/api/access/registrations/${request.id}/decline`,
                       { method: "POST" },
                       token,
                     );
@@ -296,96 +251,11 @@ export default function AccessManagement({
               </button>
             </div>
           ))}
-          {!adminRegistrations.length && (
+          {!registrations.length && (
             <div className="portal-empty">
               {loading
-                ? "Loading Admin requests…"
-                : "No pending Admin registrations."}
-            </div>
-          )}
-        </div>
-      </section>
-      <section className="dash-card">
-        <div className="card-head">
-          <div>
-            <h3>
-              <ShieldCheck size={17} /> Faculty & transport registration
-            </h3>
-            <span>
-              Codes work once and are tied to the invited email and role.
-            </span>
-          </div>
-        </div>
-        <form className="access-invite-form" onSubmit={invite}>
-          <label>
-            Email
-            <input name="email" type="email" required autoComplete="off" />
-          </label>
-          <label>
-            Role
-            <select name="role" defaultValue="FACULTY">
-              <option value="FACULTY">Faculty</option>
-              <option value="TRANSPORT">Transport</option>
-            </select>
-          </label>
-          <label>
-            Expires in
-            <select name="expiresHours" defaultValue="48">
-              <option value="24">24 hours</option>
-              <option value="48">48 hours</option>
-              <option value="168">7 days</option>
-            </select>
-          </label>
-          <button
-            className="button button-primary button-compact"
-            disabled={busy}
-          >
-            Create invitation
-          </button>
-        </form>
-        <div className="portal-list">
-          {invitations.map((inv) => {
-            const state = inv.used_at
-              ? "Used"
-              : inv.revoked_at
-                ? "Revoked"
-                : new Date(inv.expires_at).getTime() < Date.now()
-                  ? "Expired"
-                  : "Available";
-            return (
-              <div className="portal-list-row" key={inv.id}>
-                <div>
-                  <strong>
-                    {inv.email} · {roleLabels[inv.role]}
-                  </strong>
-                  <small>
-                    Expires {new Date(inv.expires_at).toLocaleString()}
-                  </small>
-                </div>
-                <span className="portal-badge">{state}</span>
-                {state === "Available" && (
-                  <button
-                    className="button button-ghost button-compact"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        await api(
-                          `/api/access/invitations/${inv.id}/revoke`,
-                          { method: "PATCH" },
-                          token,
-                        );
-                      })
-                    }
-                  >
-                    Revoke
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {!invitations.length && (
-            <div className="portal-empty">
-              {loading ? "Loading invitations…" : "No staff invitations yet."}
+                ? "Loading staff requests…"
+                : "No pending staff registrations."}
             </div>
           )}
         </div>

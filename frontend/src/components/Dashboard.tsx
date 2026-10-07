@@ -257,7 +257,7 @@ export default function Dashboard({
       void refresh(true);
     });
     socket.on("user:created", () => setPortalRefreshKey((value) => value + 1));
-    socket.on("admin-registration:changed", () =>
+    socket.on("registration:changed", () =>
       setPortalRefreshKey((value) => value + 1),
     );
     socket.on("bus:changed", () => void refresh(true));

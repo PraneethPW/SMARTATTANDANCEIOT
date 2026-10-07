@@ -4,7 +4,7 @@ Open **Open control center** on the landing page and choose Admin, Transport, Fa
 
 | Role      | Entry/dashboard | Controls                                                                                                                           |
 | --------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Admin     | `/admin`        | Campus overview, accounts and invitations, password recovery, student links, buses, timetables, attendance and reports             |
+| Admin     | `/admin`        | Campus overview, accounts and staff approvals, password recovery, student links, buses, timetables, attendance and reports         |
 | Transport | `/transport`    | Fleet, buses, drivers, routes, stops, allocations, journeys, bus attendance and verification                                       |
 | Faculty   | `/faculty`      | Assigned classes, academic attendance and verification, boarding information and reports; no account administration or bus editing |
 | Student   | `/student`      | Own linked profile, timetable, journey, bus/class attendance and notifications                                                     |
@@ -12,22 +12,15 @@ Open **Open control center** on the landing page and choose Admin, Transport, Fa
 
 Existing `/app` links redirect to the account's role dashboard. Back, Home and Sign out remain available. Existing campus design, animation and scroll effects are retained.
 
-## Registering Admins without a code
+## Registering Admin, Faculty and Transport without a code
 
-1. Choose **Admin → Register**. Enter name, email and password; there is no invitation-code field.
-2. Submit the registration. The application confirms it is awaiting campus approval. This does not create an active Admin session.
-3. An existing Admin opens **Accounts & access → Admin registrations**, verifies the applicant's identity and authorization, then checks **I verified this applicant for Admin access** and chooses **Approve Admin**.
-4. The approved person signs in with the email and password used for registration. Admins can decline requests; declined applicants receive no account access.
+1. Choose **Admin**, **Faculty** or **Transport**, then **Register**. Enter name, email and a password of at least 10 characters. No registration portal asks for an invitation code.
+2. Submit the registration. The application confirms it is awaiting campus approval; no active staff account or session is created yet.
+3. An existing Admin opens **Accounts & access → Staff registrations**. The queue shows each applicant's name, email and requested role and updates when requests arrive.
+4. Verify the applicant's identity and authorization for the displayed role. Check **I verified this applicant for [role] access**, then choose **Approve [role]**. Only an Admin can approve or decline requests.
+5. The approved person signs in with the registration email and password and receives their role's dashboard. Declined applicants receive no account access and may reapply. Duplicate requests and already handled approvals are rejected.
 
-The first Admin still uses initial workspace setup when no account exists. Existing accounts continue signing in normally. Approved or declined requests have their temporary password hash removed. Existing Admin invitation codes remain valid for clients that already received them; new Admin registrations use the approval flow.
-
-## Registering faculty and transport staff
-
-1. An existing Admin opens **Accounts & access → Staff registration**.
-2. Enter the person's email and choose Faculty or Transport. Choose a 24-hour, 48-hour or seven-day expiry.
-3. Create an invitation and copy its code. The code appears only at creation, masked in the UI. Share it privately with the invited person.
-4. The person chooses the corresponding role, opens **Register**, and enters the same email, their name, the invitation code and a password of at least 10 characters.
-5. The code can be used once. An expired, revoked, already-used, wrong-email or wrong-role code is rejected. Only its hash is stored. Admins can revoke unused invitations.
+The first Admin still uses initial workspace setup. Existing accounts continue signing in normally. Existing pending Admin requests are preserved as Admin requests. Approved or declined requests have their temporary password hash removed. Invitation creation and code-based signup have been retired; recipients of old codes should register through the new approval flow.
 
 Student registration activates immediately using the existing academic/RFID/bus checks. Parent registration continues matching only the student's registration number and recorded parent mobile number. Administrators can also create accounts and link children using the existing campus tools.
 
@@ -42,7 +35,7 @@ There is no production reset email service configured. The UI explains that reco
 5. Copy the masked link and share it privately with that person. It expires after **20 minutes**, works once, and is bound to the account. Issuing another link invalidates the previous link. A repeated public recovery request cannot invalidate an Admin-issued link.
 6. The person opens the link, enters and confirms their new password, then signs in through the correct role. Existing HTTP and Socket.IO sessions are revoked and old push subscriptions are removed.
 
-The token is in the URL fragment, rather than its query string, and is stored as a SHA-256 hash. Passwords remain bcrypt hashes; reset tokens and invitation codes are excluded from audit records and ordinary lists.
+The token is in the URL fragment, rather than its query string, and is stored as a SHA-256 hash. Passwords remain bcrypt hashes; reset tokens are excluded from audit records and ordinary lists.
 
 **Admin recovery:** another Admin must verify and assist a locked-out Admin. Maintain at least two trusted Admin accounts for this workflow. If all Admins lose access, this mode requires assistance from the deployment/database owner; it cannot generate its own approval.
 
@@ -54,4 +47,4 @@ Future optional email recovery requires both `RESEND_API_KEY` and `AUTH_EMAIL_FR
 
 ## Verification
 
-Run `pnpm build`, `pnpm test`, and, with database environment variables available, `node backend/scripts/verify-accounts.mjs` from the repository root. The integration script uses a disposable schema and deletes it after the test; production application records are not modified. It checks invitation binding/expiry/revocation, all five roles, linked child data, generic recovery responses, identity confirmation, one-time/expired reset links, session revocation and request limits.
+Run `pnpm build`, `pnpm test`, and, with database environment variables available, `node backend/scripts/verify-accounts.mjs` from the repository root. The integration script uses a disposable schema and deletes it after the test; production application records are not modified. It checks code-free registration and approval for all three staff roles, all five roles, linked child data, generic recovery responses, identity confirmation, one-time/expired reset links, session revocation and request limits.

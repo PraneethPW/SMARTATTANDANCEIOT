@@ -4,7 +4,7 @@ import { Router } from "express";
 import type { Server } from "socket.io";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { allowRoles, requireAuth, signSession } from "./auth.js";
+import { allowRoles, requireAuth } from "./auth.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { audit, fail, route, transaction } from "./http.js";
@@ -55,7 +55,7 @@ export function accountsRouter(io: Server) {
     res.json({ emailConfigured: mailConfigured() }),
   );
   r.post(
-    "/auth/admin-signup",
+    ["/auth/admin-signup", "/auth/staff-signup", "/auth/signup"],
     rateLimit({
       windowMs: 15 * 60_000,
       limit: 5,
@@ -68,8 +68,12 @@ export function accountsRouter(io: Server) {
           name: z.string().trim().min(2).max(80),
           email: emailSchema,
           password: passwordSchema,
+          role: staffRole,
         })
-        .parse(req.body);
+        .parse({
+          ...req.body,
+          role: req.path === "/auth/admin-signup" ? "ADMIN" : req.body?.role,
+        });
       const passwordHash = await bcrypt.hash(input.password, 12);
       await transaction(async (c) => {
         if (
@@ -89,53 +93,55 @@ export function accountsRouter(io: Server) {
             "This email already has an account. Sign in or use password recovery.",
           );
         const registered = await c.query(
-          "INSERT INTO admin_registration_requests(name,email,password_hash) VALUES($1,$2,$3) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,status='PENDING',requested_at=now(),handled_at=NULL,handled_by=NULL,user_id=NULL WHERE admin_registration_requests.status='DECLINED' RETURNING id",
-          [input.name, input.email, passwordHash],
+          "INSERT INTO admin_registration_requests(name,email,password_hash,role) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,role=EXCLUDED.role,status='PENDING',requested_at=now(),handled_at=NULL,handled_by=NULL,user_id=NULL WHERE admin_registration_requests.status='DECLINED' RETURNING id",
+          [input.name, input.email, passwordHash, input.role],
         );
         if (!registered.rowCount)
           fail(
             409,
-            "An Admin registration request for this email is already awaiting approval.",
+            "A registration request for this email is already awaiting approval.",
           );
       });
       io.to("operations").emit("admin-registration:changed");
-      res
-        .status(202)
-        .json({
-          pendingApproval: true,
-          message:
-            "Your Admin registration was submitted. An existing campus administrator must verify and approve your access. You can sign in with this email and password after approval.",
-        });
+      io.to("operations").emit("registration:changed");
+      res.status(202).json({
+        pendingApproval: true,
+        message: `Your ${input.role === "ADMIN" ? "Admin" : input.role === "FACULTY" ? "Faculty" : "Transport"} registration was submitted. A campus administrator must verify and approve your access. You can sign in with this email and password after approval.`,
+      });
     }),
   );
   r.get(
-    "/access/admin-registrations",
-    route(async (_req, res) =>
+    ["/access/registrations", "/access/admin-registrations"],
+    route(async (req, res) =>
       res.json({
         registrations: (
           await pool.query(
-            "SELECT id,name,email,status,requested_at,handled_at FROM admin_registration_requests WHERE status='PENDING' ORDER BY requested_at DESC LIMIT 100",
+            "SELECT id,name,email,role,status,requested_at,handled_at FROM admin_registration_requests WHERE status='PENDING' AND ($1=false OR role='ADMIN') ORDER BY requested_at DESC LIMIT 100",
+            [req.path === "/access/admin-registrations"],
           )
         ).rows,
       }),
     ),
   );
   r.post(
-    "/access/admin-registrations/:id/approve",
+    [
+      "/access/registrations/:id/approve",
+      "/access/admin-registrations/:id/approve",
+    ],
     route(async (req, res) => {
       const id = z.string().uuid().parse(req.params.id);
       z.object({ identityConfirmed: z.literal(true) }).parse(req.body);
       const user = await transaction(async (c) => {
         const request = (
           await c.query(
-            "SELECT * FROM admin_registration_requests WHERE id=$1 AND status='PENDING' FOR UPDATE",
-            [id],
+            "SELECT * FROM admin_registration_requests WHERE id=$1 AND status='PENDING' AND ($2=false OR role='ADMIN') FOR UPDATE",
+            [id, req.path.startsWith("/access/admin-registrations/")],
           )
         ).rows[0];
         if (!request)
           fail(
             409,
-            "This Admin request has already been handled or is unavailable.",
+            "This registration request has already been handled or is unavailable.",
           );
         if (
           (
@@ -150,8 +156,8 @@ export function accountsRouter(io: Server) {
           );
         const created = (
           await c.query(
-            "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,'ADMIN') RETURNING id,name,email,role",
-            [request.name, request.email, request.password_hash],
+            "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,name,email,role",
+            [request.name, request.email, request.password_hash, request.role],
           )
         ).rows[0];
         await c.query(
@@ -161,186 +167,53 @@ export function accountsRouter(io: Server) {
         await audit(
           c,
           req.user!.id,
-          "APPROVE_ADMIN_REGISTRATION",
+          "APPROVE_STAFF_REGISTRATION",
           "user",
           created.id,
           null,
-          { identityConfirmed: true, registrationId: id },
+          { identityConfirmed: true, registrationId: id, role: created.role },
         );
         return created;
       });
-      io.to("operations").emit("user:created", { role: "ADMIN" });
+      io.to("operations").emit("user:created", { role: user.role });
+      io.to("operations").emit("registration:changed");
       res.status(201).json({ approved: true, user });
     }),
   );
   r.post(
-    "/access/admin-registrations/:id/decline",
+    [
+      "/access/registrations/:id/decline",
+      "/access/admin-registrations/:id/decline",
+    ],
     route(async (req, res) => {
       const id = z.string().uuid().parse(req.params.id);
       await transaction(async (c) => {
         const updated = await c.query(
-          "UPDATE admin_registration_requests SET status='DECLINED',password_hash=NULL,handled_by=$2,handled_at=now() WHERE id=$1 AND status='PENDING' RETURNING id",
-          [id, req.user!.id],
+          "UPDATE admin_registration_requests SET status='DECLINED',password_hash=NULL,handled_by=$2,handled_at=now() WHERE id=$1 AND status='PENDING' AND ($3=false OR role='ADMIN') RETURNING id,role",
+          [
+            id,
+            req.user!.id,
+            req.path.startsWith("/access/admin-registrations/"),
+          ],
         );
         if (!updated.rowCount)
           fail(
             409,
-            "This Admin request has already been handled or is unavailable.",
+            "This registration request has already been handled or is unavailable.",
           );
         await audit(
           c,
           req.user!.id,
-          "DECLINE_ADMIN_REGISTRATION",
-          "admin_registration",
+          "DECLINE_STAFF_REGISTRATION",
+          "staff_registration",
           id,
           null,
-          {},
+          { role: updated.rows[0].role },
         );
       });
       io.to("operations").emit("admin-registration:changed");
+      io.to("operations").emit("registration:changed");
       res.json({ declined: true });
-    }),
-  );
-  r.get(
-    "/access/invitations",
-    route(async (_req, res) =>
-      res.json({
-        invitations: (
-          await pool.query(
-            "SELECT id,email,role,expires_at,used_at,revoked_at,created_at FROM staff_invitations ORDER BY created_at DESC LIMIT 100",
-          )
-        ).rows,
-      }),
-    ),
-  );
-  r.post(
-    "/access/invitations",
-    route(async (req, res) => {
-      const input = z
-        .object({
-          email: emailSchema,
-          role: staffRole,
-          expiresHours: z.number().int().min(1).max(168).default(48),
-        })
-        .parse(req.body);
-      const code = randomBytes(32).toString("hex");
-      const invitation = await transaction(async (c) => {
-        if (
-          (await c.query("SELECT id FROM users WHERE email=$1", [input.email]))
-            .rowCount
-        )
-          fail(
-            409,
-            "An account already exists for this email. Use password recovery.",
-          );
-        const created = (
-          await c.query(
-            "INSERT INTO staff_invitations(email,role,token_hash,created_by,expires_at) VALUES($1,$2,$3,$4,now()+$5*interval '1 hour') RETURNING id,email,role,expires_at",
-            [
-              input.email,
-              input.role,
-              tokenHash(code),
-              req.user!.id,
-              input.expiresHours,
-            ],
-          )
-        ).rows[0];
-        await audit(
-          c,
-          req.user!.id,
-          "CREATE_STAFF_INVITATION",
-          "staff_invitation",
-          created.id,
-          null,
-          { email: input.email, role: input.role },
-        );
-        return created;
-      });
-      res.status(201).json({ invitation, code });
-    }),
-  );
-  r.patch(
-    "/access/invitations/:id/revoke",
-    route(async (req, res) => {
-      const id = z.string().uuid().parse(req.params.id);
-      const count = await transaction(async (c) => {
-        const updated = await c.query(
-          "UPDATE staff_invitations SET revoked_at=now() WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL RETURNING id",
-          [id],
-        );
-        if (updated.rowCount)
-          await audit(
-            c,
-            req.user!.id,
-            "REVOKE_STAFF_INVITATION",
-            "staff_invitation",
-            id,
-            null,
-            {},
-          );
-        return updated.rowCount;
-      });
-      if (!count)
-        fail(409, "Invitation is already used, revoked or unavailable");
-      res.json({ revoked: true });
-    }),
-  );
-  r.post(
-    ["/auth/staff-signup", "/auth/signup"],
-    route(async (req, res) => {
-      const input = z
-        .object({
-          name: z.string().trim().min(2).max(80),
-          email: emailSchema,
-          password: passwordSchema,
-          role: staffRole,
-          invitationCode: z.string().trim().max(128).default(""),
-        })
-        .parse(req.body);
-      if (!/^[a-f0-9]{64}$/.test(input.invitationCode))
-        fail(
-          403,
-          "Enter the invitation code issued for your email and selected role.",
-        );
-      const passwordHash = await bcrypt.hash(input.password, 12);
-      const user = await transaction(async (c) => {
-        const invite = (
-          await c.query(
-            "SELECT * FROM staff_invitations WHERE token_hash=$1 AND email=$2 AND role=$3 AND expires_at>now() AND used_at IS NULL AND revoked_at IS NULL FOR UPDATE",
-            [tokenHash(input.invitationCode), input.email, input.role],
-          )
-        ).rows[0];
-        if (!invite)
-          fail(
-            403,
-            "Invitation is invalid, expired, used, or issued for another email or role.",
-          );
-        if (
-          (await c.query("SELECT id FROM users WHERE email=$1", [input.email]))
-            .rowCount
-        )
-          fail(
-            409,
-            "This email already has an account. Sign in or use password recovery.",
-          );
-        const created = (
-          await c.query(
-            "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,name,email,role",
-            [input.name, input.email, passwordHash, input.role],
-          )
-        ).rows[0];
-        await c.query(
-          "UPDATE staff_invitations SET used_at=now(),used_by=$2 WHERE id=$1",
-          [invite.id, created.id],
-        );
-        await audit(c, created.id, "REGISTER_STAFF", "user", created.id, null, {
-          role: created.role,
-          invitedBy: invite.created_by,
-        });
-        return created;
-      });
-      io.to("operations").emit("user:created", { role: user.role });
-      res.status(201).json({ user, token: signSession(user) });
     }),
   );
   r.post(

@@ -29,3 +29,5 @@ CREATE TABLE IF NOT EXISTS admin_registration_requests (
  handled_by uuid REFERENCES users(id), user_id uuid REFERENCES users(id),
  CHECK ((status='PENDING' AND password_hash IS NOT NULL) OR (status<>'PENDING' AND password_hash IS NULL))
 );
+-- Existing Admin requests retain their role when expanding code-free registration.
+ALTER TABLE admin_registration_requests ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'ADMIN' CHECK(role IN ('ADMIN','FACULTY','TRANSPORT'));

@@ -4,7 +4,7 @@ TransitSync AI connects independent bus, classroom and hostel attendance with li
 
 See [Operations workflow and setup](docs/OPERATIONS.md) for route/seat configuration, camera enrollment, GPS, notifications, reports and acceptance checks.
 
-See [Accounts and password recovery](docs/ACCOUNTS.md) for five-role sign-in, staff invitations and administrator-assisted reset links.
+See [Accounts and password recovery](docs/ACCOUNTS.md) for five-role sign-in, code-free staff registration and administrator-assisted reset links.
 
 ## Architecture
 
