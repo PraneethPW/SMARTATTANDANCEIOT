@@ -54,6 +54,153 @@ export function accountsRouter(io: Server) {
   r.get("/access/status", (_req, res) =>
     res.json({ emailConfigured: mailConfigured() }),
   );
+  r.post(
+    "/auth/admin-signup",
+    rateLimit({
+      windowMs: 15 * 60_000,
+      limit: 5,
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+    route(async (req, res) => {
+      const input = z
+        .object({
+          name: z.string().trim().min(2).max(80),
+          email: emailSchema,
+          password: passwordSchema,
+        })
+        .parse(req.body);
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      await transaction(async (c) => {
+        if (
+          !(await c.query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1"))
+            .rowCount
+        )
+          fail(
+            409,
+            "The workspace needs its first administrator. Open initial workspace setup.",
+          );
+        if (
+          (await c.query("SELECT id FROM users WHERE email=$1", [input.email]))
+            .rowCount
+        )
+          fail(
+            409,
+            "This email already has an account. Sign in or use password recovery.",
+          );
+        const registered = await c.query(
+          "INSERT INTO admin_registration_requests(name,email,password_hash) VALUES($1,$2,$3) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,status='PENDING',requested_at=now(),handled_at=NULL,handled_by=NULL,user_id=NULL WHERE admin_registration_requests.status='DECLINED' RETURNING id",
+          [input.name, input.email, passwordHash],
+        );
+        if (!registered.rowCount)
+          fail(
+            409,
+            "An Admin registration request for this email is already awaiting approval.",
+          );
+      });
+      io.to("operations").emit("admin-registration:changed");
+      res
+        .status(202)
+        .json({
+          pendingApproval: true,
+          message:
+            "Your Admin registration was submitted. An existing campus administrator must verify and approve your access. You can sign in with this email and password after approval.",
+        });
+    }),
+  );
+  r.get(
+    "/access/admin-registrations",
+    route(async (_req, res) =>
+      res.json({
+        registrations: (
+          await pool.query(
+            "SELECT id,name,email,status,requested_at,handled_at FROM admin_registration_requests WHERE status='PENDING' ORDER BY requested_at DESC LIMIT 100",
+          )
+        ).rows,
+      }),
+    ),
+  );
+  r.post(
+    "/access/admin-registrations/:id/approve",
+    route(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.id);
+      z.object({ identityConfirmed: z.literal(true) }).parse(req.body);
+      const user = await transaction(async (c) => {
+        const request = (
+          await c.query(
+            "SELECT * FROM admin_registration_requests WHERE id=$1 AND status='PENDING' FOR UPDATE",
+            [id],
+          )
+        ).rows[0];
+        if (!request)
+          fail(
+            409,
+            "This Admin request has already been handled or is unavailable.",
+          );
+        if (
+          (
+            await c.query("SELECT id FROM users WHERE email=$1", [
+              request.email,
+            ])
+          ).rowCount
+        )
+          fail(
+            409,
+            "An account already exists for this email. Decline this request and manage the existing account.",
+          );
+        const created = (
+          await c.query(
+            "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,'ADMIN') RETURNING id,name,email,role",
+            [request.name, request.email, request.password_hash],
+          )
+        ).rows[0];
+        await c.query(
+          "UPDATE admin_registration_requests SET status='APPROVED',password_hash=NULL,handled_by=$2,handled_at=now(),user_id=$3 WHERE id=$1",
+          [id, req.user!.id, created.id],
+        );
+        await audit(
+          c,
+          req.user!.id,
+          "APPROVE_ADMIN_REGISTRATION",
+          "user",
+          created.id,
+          null,
+          { identityConfirmed: true, registrationId: id },
+        );
+        return created;
+      });
+      io.to("operations").emit("user:created", { role: "ADMIN" });
+      res.status(201).json({ approved: true, user });
+    }),
+  );
+  r.post(
+    "/access/admin-registrations/:id/decline",
+    route(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.id);
+      await transaction(async (c) => {
+        const updated = await c.query(
+          "UPDATE admin_registration_requests SET status='DECLINED',password_hash=NULL,handled_by=$2,handled_at=now() WHERE id=$1 AND status='PENDING' RETURNING id",
+          [id, req.user!.id],
+        );
+        if (!updated.rowCount)
+          fail(
+            409,
+            "This Admin request has already been handled or is unavailable.",
+          );
+        await audit(
+          c,
+          req.user!.id,
+          "DECLINE_ADMIN_REGISTRATION",
+          "admin_registration",
+          id,
+          null,
+          {},
+        );
+      });
+      io.to("operations").emit("admin-registration:changed");
+      res.json({ declined: true });
+    }),
+  );
   r.get(
     "/access/invitations",
     route(async (_req, res) =>

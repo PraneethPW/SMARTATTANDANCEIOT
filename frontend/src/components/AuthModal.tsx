@@ -114,6 +114,22 @@ export default function AuthModal({
       parentContact: String(data.get("parentContact") || ""),
     };
     try {
+      if (mode === "signup" && portalRole === "ADMIN") {
+        const response = await api<{ message: string }>(
+          "/api/auth/admin-signup",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name: payload.name,
+              email: payload.email,
+              password: payload.password,
+            }),
+          },
+        );
+        setMode("login");
+        setMessage(response.message);
+        return;
+      }
       if (mode === "forgot") {
         const response = await api<{ message: string }>(
           "/api/auth/forgot-password",
@@ -273,7 +289,9 @@ export default function AuthModal({
                               ? "Enter your academic and bus details. A new registration becomes active immediately; an existing record must match its RFID card and class."
                               : portalRole === "PARENT"
                                 ? "Your child’s registration number and the parent mobile number on their record must match. Your name is used only for your account."
-                                : "Register with the invitation code issued for your email and selected staff role."
+                                : portalRole === "ADMIN"
+                                  ? "Register with your name, email and password. An existing campus administrator will verify and approve your access."
+                                  : "Register with the invitation code issued for your email and selected staff role."
                             : portalRole
                               ? roleDescriptions[portalRole]
                               : "Sign in with your institutional account. Faculty and transport accounts are created by a campus administrator."}
@@ -342,7 +360,7 @@ export default function AuthModal({
                       />
                     </label>
                   )}
-                  {mode === "signup" && staff && (
+                  {mode === "signup" && staff && portalRole !== "ADMIN" && (
                     <label>
                       Campus invitation code
                       <input
@@ -554,9 +572,11 @@ export default function AuthModal({
                         : mode === "bootstrap"
                           ? "Create secure workspace"
                           : mode === "signup"
-                            ? portalRole
-                              ? `Register & open ${portalRole.toLowerCase()} dashboard`
-                              : "Create account & continue"
+                            ? portalRole === "ADMIN"
+                              ? "Submit Admin registration"
+                              : portalRole
+                                ? `Register & open ${portalRole.toLowerCase()} dashboard`
+                                : "Create account & continue"
                             : portalRole
                               ? `Open ${portalRole.toLowerCase()} dashboard`
                               : "Enter control center"}

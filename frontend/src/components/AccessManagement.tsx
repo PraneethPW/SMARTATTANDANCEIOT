@@ -31,6 +31,12 @@ type Recovery = {
   requested_at: string;
 };
 type Account = { id: string; name: string; email: string; role: Role };
+type AdminRegistration = {
+  id: string;
+  name: string;
+  email: string;
+  requested_at: string;
+};
 export default function AccessManagement({
   token,
   refreshKey,
@@ -41,6 +47,9 @@ export default function AccessManagement({
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [requests, setRequests] = useState<Recovery[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [adminRegistrations, setAdminRegistrations] = useState<
+    AdminRegistration[]
+  >([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,7 +69,7 @@ export default function AccessManagement({
   }, [secret]);
   const load = useCallback(async () => {
     try {
-      const [inv, recovery, status, users] = await Promise.all([
+      const [inv, recovery, status, users, registrations] = await Promise.all([
         api<{ invitations: Invitation[] }>(
           "/api/access/invitations",
           {},
@@ -69,10 +78,16 @@ export default function AccessManagement({
         api<{ requests: Recovery[] }>("/api/access/recovery", {}, token),
         api<{ emailConfigured: boolean }>("/api/access/status", {}, token),
         api<{ users: Account[] }>("/api/users", {}, token),
+        api<{ registrations: AdminRegistration[] }>(
+          "/api/access/admin-registrations",
+          {},
+          token,
+        ),
       ]);
       setInvitations(inv.invitations);
       setRequests(recovery.requests);
       setAccounts(users.users);
+      setAdminRegistrations(registrations.registrations);
       setEmailConfigured(status.emailConfigured);
       setError("");
     } catch (cause) {
@@ -212,8 +227,89 @@ export default function AccessManagement({
       <section className="dash-card">
         <div className="card-head">
           <div>
+            <h3>Admin registrations</h3>
+            <span>
+              Applicants register with name, email and password. Approve campus
+              Admin access after verification.
+            </span>
+          </div>
+          <ShieldCheck size={20} />
+        </div>
+        <div className="portal-list">
+          {adminRegistrations.map((request) => (
+            <div className="access-recovery-row" key={request.id}>
+              <div>
+                <strong>{request.name}</strong>
+                <small>{request.email}</small>
+                <small>
+                  Requested {new Date(request.requested_at).toLocaleString()}
+                </small>
+              </div>
+              <label className="access-confirm">
+                <input
+                  type="checkbox"
+                  checked={Boolean(confirmed[request.id])}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setConfirmed((old) => ({
+                      ...old,
+                      [request.id]: e.target.checked,
+                    }))
+                  }
+                />{" "}
+                I verified this applicant for Admin access
+              </label>
+              <button
+                className="button button-primary button-compact"
+                disabled={busy || !confirmed[request.id]}
+                onClick={() =>
+                  void run(async () => {
+                    await api(
+                      `/api/access/admin-registrations/${request.id}/approve`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({ identityConfirmed: true }),
+                      },
+                      token,
+                    );
+                    setConfirmed((old) => ({ ...old, [request.id]: false }));
+                  })
+                }
+              >
+                Approve Admin
+              </button>
+              <button
+                className="button button-ghost button-compact"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await api(
+                      `/api/access/admin-registrations/${request.id}/decline`,
+                      { method: "POST" },
+                      token,
+                    );
+                    setConfirmed((old) => ({ ...old, [request.id]: false }));
+                  })
+                }
+              >
+                Decline
+              </button>
+            </div>
+          ))}
+          {!adminRegistrations.length && (
+            <div className="portal-empty">
+              {loading
+                ? "Loading Admin requests…"
+                : "No pending Admin registrations."}
+            </div>
+          )}
+        </div>
+      </section>
+      <section className="dash-card">
+        <div className="card-head">
+          <div>
             <h3>
-              <ShieldCheck size={17} /> Staff registration
+              <ShieldCheck size={17} /> Faculty & transport registration
             </h3>
             <span>
               Codes work once and are tied to the invited email and role.
@@ -230,7 +326,6 @@ export default function AccessManagement({
             <select name="role" defaultValue="FACULTY">
               <option value="FACULTY">Faculty</option>
               <option value="TRANSPORT">Transport</option>
-              <option value="ADMIN">Admin</option>
             </select>
           </label>
           <label>

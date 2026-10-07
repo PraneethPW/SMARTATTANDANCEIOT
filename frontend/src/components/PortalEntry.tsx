@@ -54,7 +54,10 @@ export default function PortalEntry({
         {
           icon: Users,
           title: "Campus access",
-          copy: "Register with an invitation issued by your administrator for your email and role.",
+          copy:
+            role === "ADMIN"
+              ? "Register with your name, email and password. An existing Admin verifies and approves campus access."
+              : "Register with an invitation issued by your administrator for your email and role.",
         },
       ]
     : [
@@ -145,11 +148,13 @@ export default function PortalEntry({
             </button>
           </div>
           <small>
-            {staff
-              ? "Staff registration requires a campus invitation. Forgot password is available on the sign-in and registration forms."
-              : parent
-                ? "Parent registration matches the contact details already stored for a student."
-                : "Student registration links academic details, residency, RFID card and assigned transport."}
+            {role === "ADMIN"
+              ? "Admin registration needs no invitation code. An existing campus Admin approves new Admin access."
+              : staff
+                ? "Staff registration requires a campus invitation. Forgot password is available on the sign-in and registration forms."
+                : parent
+                  ? "Parent registration matches the contact details already stored for a student."
+                  : "Student registration links academic details, residency, RFID card and assigned transport."}
           </small>
         </motion.div>
         <motion.div

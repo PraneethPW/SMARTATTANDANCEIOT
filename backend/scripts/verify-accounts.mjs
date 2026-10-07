@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { writeFile } from "node:fs/promises";
 import pg from "pg";
 import jwt from "jsonwebtoken";
 const { io } = createRequire(
@@ -26,6 +27,7 @@ const password = randomBytes(24).toString("base64url"),
   newPassword = randomBytes(24).toString("base64url"),
   jwtSecret = randomBytes(40).toString("hex");
 let server,
+  keep = false,
   log = "",
   requestIndex = 1;
 const sockets = [],
@@ -205,6 +207,142 @@ try {
     accounts.PARENT.token,
   );
   assert.equal(studentPortal.students[0].id, parentPortal.students[0].id);
+  const requestedAdmin = {
+    name: "Code-free Test Admin",
+    email: "requested.admin@example.org",
+    password,
+  };
+  await call("/api/auth/admin-signup", "POST", requestedAdmin, undefined, 202);
+  assert.equal(
+    (
+      await pool.query("SELECT count(*)::int AS n FROM users WHERE email=$1", [
+        requestedAdmin.email,
+      ])
+    ).rows[0].n,
+    0,
+  );
+  await call("/api/auth/admin-signup", "POST", requestedAdmin, undefined, 409);
+  await call(
+    "/api/auth/login",
+    "POST",
+    { email: requestedAdmin.email, password, role: "ADMIN" },
+    undefined,
+    401,
+  );
+  const adminRequests = await call(
+    "/api/access/admin-registrations",
+    "GET",
+    undefined,
+    admin.token,
+  );
+  assert.equal(adminRequests.registrations.length, 1);
+  assert.ok(!("password_hash" in adminRequests.registrations[0]));
+  const requestedId = adminRequests.registrations[0].id;
+  for (const role of ["FACULTY", "TRANSPORT", "STUDENT", "PARENT"]) {
+    await call(
+      "/api/access/admin-registrations",
+      "GET",
+      undefined,
+      accounts[role].token,
+      403,
+    );
+    await call(
+      "/api/access/admin-registrations/" + requestedId + "/approve",
+      "POST",
+      { identityConfirmed: true },
+      accounts[role].token,
+      403,
+    );
+    await call(
+      "/api/access/admin-registrations/" + requestedId + "/decline",
+      "POST",
+      undefined,
+      accounts[role].token,
+      403,
+    );
+  }
+  await call(
+    "/api/access/admin-registrations/" + requestedId + "/approve",
+    "POST",
+    { identityConfirmed: false },
+    admin.token,
+    400,
+  );
+  await call(
+    "/api/access/admin-registrations/" + requestedId + "/approve",
+    "POST",
+    { identityConfirmed: true },
+    admin.token,
+    201,
+  );
+  assert.equal(
+    (
+      await call("/api/auth/login", "POST", {
+        email: requestedAdmin.email,
+        password,
+        role: "ADMIN",
+      })
+    ).user.role,
+    "ADMIN",
+  );
+  await call(
+    "/api/access/admin-registrations/" + requestedId + "/approve",
+    "POST",
+    { identityConfirmed: true },
+    admin.token,
+    409,
+  );
+  await call("/api/auth/admin-signup", "POST", requestedAdmin, undefined, 409);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT password_hash FROM admin_registration_requests WHERE id=$1",
+        [requestedId],
+      )
+    ).rows[0].password_hash,
+    null,
+  );
+  const declinedAdmin = {
+    name: "Declined Test Admin",
+    email: "declined.admin@example.org",
+    password,
+  };
+  await call("/api/auth/admin-signup", "POST", declinedAdmin, undefined, 202);
+  const declinedId = (
+    await call("/api/access/admin-registrations", "GET", undefined, admin.token)
+  ).registrations[0].id;
+  await call(
+    "/api/access/admin-registrations/" + declinedId + "/decline",
+    "POST",
+    undefined,
+    admin.token,
+  );
+  await call(
+    "/api/auth/login",
+    "POST",
+    { email: declinedAdmin.email, password, role: "ADMIN" },
+    undefined,
+    401,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT password_hash FROM admin_registration_requests WHERE id=$1",
+        [declinedId],
+      )
+    ).rows[0].password_hash,
+    null,
+  );
+  await call("/api/auth/admin-signup", "POST", declinedAdmin, undefined, 202);
+  await call(
+    "/api/access/admin-registrations/" + declinedId + "/decline",
+    "POST",
+    undefined,
+    admin.token,
+  );
+  check(
+    "Code-free Admin registration stays pending until an existing verified Admin approves; duplicate/unauthorized approvals and declined logins fail",
+  );
   for (const role of ["FACULTY", "TRANSPORT", "STUDENT", "PARENT"]) {
     const account = accounts[role];
     await call(
@@ -453,9 +591,42 @@ try {
     "Expired and forged resets fail; database/audits contain hashes only; recovery requests are rate limited",
   );
   console.log("Verified " + passed.length + " account integration groups.");
+  if (process.argv.includes("--keep")) {
+    await call(
+      "/api/auth/admin-signup",
+      "POST",
+      {
+        name: "Test Admin Applicant",
+        email: "pending.admin@example.org",
+        password,
+      },
+      undefined,
+      202,
+    );
+    await writeFile(
+      new URL("../../../accounts-ui-session.json", import.meta.url),
+      JSON.stringify(
+        {
+          schema,
+          port,
+          pid: server.pid,
+          admin: { ...accounts.ADMIN, password: newPassword },
+        },
+        null,
+        2,
+      ),
+    );
+    keep = true;
+    console.log(
+      "Isolated server retained for UI checks. Credentials saved outside the repository.",
+    );
+  }
 } finally {
   for (const socket of sockets) socket.disconnect();
-  server?.kill();
-  await pool.query("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+  if (!keep) {
+    server?.kill();
+    await pool.query("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+  }
   await pool.end();
+  if (keep) server.unref();
 }

@@ -12,10 +12,19 @@ Open **Open control center** on the landing page and choose Admin, Transport, Fa
 
 Existing `/app` links redirect to the account's role dashboard. Back, Home and Sign out remain available. Existing campus design, animation and scroll effects are retained.
 
-## Registering staff
+## Registering Admins without a code
+
+1. Choose **Admin → Register**. Enter name, email and password; there is no invitation-code field.
+2. Submit the registration. The application confirms it is awaiting campus approval. This does not create an active Admin session.
+3. An existing Admin opens **Accounts & access → Admin registrations**, verifies the applicant's identity and authorization, then checks **I verified this applicant for Admin access** and chooses **Approve Admin**.
+4. The approved person signs in with the email and password used for registration. Admins can decline requests; declined applicants receive no account access.
+
+The first Admin still uses initial workspace setup when no account exists. Existing accounts continue signing in normally. Approved or declined requests have their temporary password hash removed. Existing Admin invitation codes remain valid for clients that already received them; new Admin registrations use the approval flow.
+
+## Registering faculty and transport staff
 
 1. An existing Admin opens **Accounts & access → Staff registration**.
-2. Enter the person's email and choose Faculty, Transport or Admin. Choose a 24-hour, 48-hour or seven-day expiry.
+2. Enter the person's email and choose Faculty or Transport. Choose a 24-hour, 48-hour or seven-day expiry.
 3. Create an invitation and copy its code. The code appears only at creation, masked in the UI. Share it privately with the invited person.
 4. The person chooses the corresponding role, opens **Register**, and enters the same email, their name, the invitation code and a password of at least 10 characters.
 5. The code can be used once. An expired, revoked, already-used, wrong-email or wrong-role code is rejected. Only its hash is stored. Admins can revoke unused invitations.
