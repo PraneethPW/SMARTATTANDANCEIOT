@@ -42,7 +42,12 @@ export async function initializeDatabase() {
   const schema =
     (await readFile(schemaPath, "utf8")) +
     "\n" +
-    (await readFile(path.resolve(currentDir, "../sql/operations.sql"), "utf8"));
+    (await readFile(
+      path.resolve(currentDir, "../sql/operations.sql"),
+      "utf8",
+    )) +
+    "\n" +
+    (await readFile(path.resolve(currentDir, "../sql/accounts.sql"), "utf8"));
   await retryWithBackoff(
     async () => {
       const client = await pool.connect();

@@ -67,6 +67,7 @@ import type {
   Student,
 } from "../types";
 import PortalManagement from "./PortalManagement";
+import AccessManagement from "./AccessManagement";
 import ClassWorkspace, { VerificationWorkspace } from "./ClassWorkspace";
 import TransportManagement, { BusEditor } from "./TransportManagement";
 import TransportReports from "./TransportReports";
@@ -109,7 +110,7 @@ const nav = [
   { id: "bus-attendance", label: "Bus attendance", icon: Route },
   { id: "verification", label: "RFID & face", icon: ScanLine },
   { id: "registry", label: "Registry", icon: Database },
-  { id: "portals", label: "Portals", icon: Users },
+  { id: "portals", label: "Accounts & access", icon: Users },
   { id: "ai", label: "AI analysis", icon: Bot },
 ] as const;
 
@@ -125,7 +126,7 @@ export default function Dashboard({
   const visibleNav = nav.filter(({ id }) => {
     if (session.user.role === "ADMIN") return true;
     if (session.user.role === "FACULTY")
-      return !["portals", "buses"].includes(id);
+      return !["portals", "buses", "live"].includes(id);
     return [
       "overview",
       "live",
@@ -236,6 +237,9 @@ export default function Dashboard({
       toast(message, "live");
       void refresh(true);
     };
+    socket.on("auth:revoked", () =>
+      window.dispatchEvent(new Event("transitsync:session-expired")),
+    );
     socket.on("connect", () => setSocketStatus("live"));
     socket.on("disconnect", () => setSocketStatus("offline"));
     socket.on("connect_error", () => setSocketStatus("offline"));
@@ -515,15 +519,21 @@ export default function Dashboard({
             />
           ) : null}
           {tab === "portals" && session.user.role === "ADMIN" ? (
-            <PortalManagement
-              token={session.token}
-              refreshKey={portalRefreshKey}
-              onCreate={(role) => {
-                setNewUserRole(role);
-                setPanel("user");
-              }}
-              onLink={() => setPanel("link")}
-            />
+            <>
+              <AccessManagement
+                token={session.token}
+                refreshKey={portalRefreshKey}
+              />
+              <PortalManagement
+                token={session.token}
+                refreshKey={portalRefreshKey}
+                onCreate={(role) => {
+                  setNewUserRole(role);
+                  setPanel("user");
+                }}
+                onLink={() => setPanel("link")}
+              />
+            </>
           ) : null}
           {tab === "ai" ? <OperationsAnalytics token={session.token} /> : null}
           {tab === "ai" ? (

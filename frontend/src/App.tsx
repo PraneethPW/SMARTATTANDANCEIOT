@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { api, disconnectPush, type Session } from "./api";
+import { dashboardPaths, type Role } from "./roles";
 import AuthModal from "./components/AuthModal";
 import Landing from "./components/Landing";
 import PortalEntry from "./components/PortalEntry";
@@ -18,11 +19,30 @@ export default function App() {
       return null;
     }
   });
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authOpen, setAuthOpen] = useState(
+    window.location.pathname === "/reset-password",
+  );
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "reset">(
+    window.location.pathname === "/reset-password" ? "reset" : "login",
+  );
+  const [resetToken, setResetToken] = useState(
+    () => new URLSearchParams(window.location.hash.slice(1)).get("token") || "",
+  );
 
   useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname);
+    const onPopState = () => {
+      setPath(window.location.pathname);
+      if (window.location.pathname === "/reset-password") {
+        setResetToken(
+          new URLSearchParams(window.location.hash.slice(1)).get("token") || "",
+        );
+        setAuthMode("reset");
+        setAuthOpen(true);
+      } else {
+        setAuthOpen(false);
+        setResetToken("");
+      }
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -33,6 +53,21 @@ export default function App() {
     setPath(next);
     window.scrollTo(0, 0);
   };
+
+  useEffect(() => {
+    const expire = (event: Event) => {
+      const revokedToken = (event as CustomEvent<{ token?: string }>).detail
+        ?.token;
+      setSession((current) => {
+        if (revokedToken && current?.token !== revokedToken) return current;
+        localStorage.removeItem("transitsync-session");
+        return null;
+      });
+    };
+    window.addEventListener("transitsync:session-expired", expire);
+    return () =>
+      window.removeEventListener("transitsync:session-expired", expire);
+  }, []);
   const logout = () => {
     const token = session?.token;
     localStorage.removeItem("transitsync-session");
@@ -45,11 +80,17 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     let active = true;
-    api("/api/auth/me", {}, session.token).catch(() => {
-      if (!active) return;
-      localStorage.removeItem("transitsync-session");
-      setSession(null);
-    });
+    api<{ user: Session["user"] }>("/api/auth/me", {}, session.token)
+      .then(({ user }) => {
+        if (!active || JSON.stringify(user) === JSON.stringify(session.user))
+          return;
+        const refreshed = { ...session, user };
+        localStorage.setItem("transitsync-session", JSON.stringify(refreshed));
+        setSession(refreshed);
+      })
+      .catch(() => {
+        // A 401 clears the matching session; transient API failures preserve it.
+      });
     return () => {
       active = false;
     };
@@ -57,19 +98,18 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
-    const correctPath =
-      session.user.role === "STUDENT"
-        ? "/student"
-        : session.user.role === "PARENT"
-          ? "/parent"
-          : "/app";
-    if (path !== "/" && window.location.pathname !== correctPath) {
+    const correctPath = dashboardPaths[session.user.role];
+    if (
+      path !== "/" &&
+      path !== "/reset-password" &&
+      window.location.pathname !== correctPath
+    ) {
       window.history.replaceState({}, "", correctPath);
       setPath(correctPath);
     }
   }, [session, path]);
 
-  if (session && path !== "/")
+  if (session && path !== "/" && path !== "/reset-password")
     return (
       <Suspense
         fallback={
@@ -94,7 +134,9 @@ export default function App() {
       </Suspense>
     );
   const portalRole =
-    path === "/student" ? "STUDENT" : path === "/parent" ? "PARENT" : null;
+    (Object.keys(dashboardPaths) as Role[]).find(
+      (role) => dashboardPaths[role] === path,
+    ) ?? null;
   return (
     <>
       {portalRole ? (
@@ -115,13 +157,7 @@ export default function App() {
           onLogout={session ? logout : undefined}
           onEnter={() => {
             if (session) {
-              navigate(
-                session.user.role === "STUDENT"
-                  ? "/student"
-                  : session.user.role === "PARENT"
-                    ? "/parent"
-                    : "/app",
-              );
+              navigate(dashboardPaths[session.user.role]);
               return;
             }
             setAuthMode("login");
@@ -133,17 +169,26 @@ export default function App() {
         open={authOpen}
         initialMode={authMode}
         portalRole={portalRole}
-        onClose={() => setAuthOpen(false)}
+        resetToken={resetToken}
+        onResetComplete={() => {
+          window.history.replaceState({}, "", "/");
+          setPath("/");
+          setResetToken("");
+          setAuthMode("login");
+          setAuthOpen(true);
+        }}
+        onClose={() => {
+          setAuthOpen(false);
+          if (path === "/reset-password") {
+            window.history.replaceState({}, "", "/");
+            setPath("/");
+            setResetToken("");
+          }
+        }}
         onAuthenticated={(value) => {
           setSession(value);
           setAuthOpen(false);
-          navigate(
-            value.user.role === "STUDENT"
-              ? "/student"
-              : value.user.role === "PARENT"
-                ? "/parent"
-                : "/app",
-          );
+          navigate(dashboardPaths[value.user.role]);
         }}
       />
     </>

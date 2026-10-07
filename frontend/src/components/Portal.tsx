@@ -247,6 +247,9 @@ export default function Portal({
       transports: ["websocket", "polling"],
     });
 
+    socket.on("auth:revoked", () =>
+      window.dispatchEvent(new Event("transitsync:session-expired")),
+    );
     socket.on("connect", () => setConnected(true));
 
     socket.on("disconnect", () => setConnected(false));

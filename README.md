@@ -4,6 +4,8 @@ TransitSync AI connects independent bus, classroom and hostel attendance with li
 
 See [Operations workflow and setup](docs/OPERATIONS.md) for route/seat configuration, camera enrollment, GPS, notifications, reports and acceptance checks.
 
+See [Accounts and password recovery](docs/ACCOUNTS.md) for five-role sign-in, staff invitations and administrator-assisted reset links.
+
 ## Architecture
 
 - `frontend/` — React, TypeScript, Tailwind CSS, Three.js, GSAP, Framer Motion, Recharts, Socket.IO
@@ -29,7 +31,7 @@ The API runs locally on `http://localhost:8081` and applies the idempotent SQL s
 
 ## Student and parent portals
 
-The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Students can register immediately with their name, registration number, RFID UID, department, year, section, residency, and an existing bus (optional for hostel students). If a campus student record already exists, these details must match before the account can claim it. Parents register with only the child's registration number and the parent mobile number recorded on that student's active record; the parent's account name is not a matching field. Local and `+91` mobile formats are accepted. Parents can link another child from their dashboard using the same two fields. Administrators can also create linked accounts under **Portals**. An administrator account remains in operations.
+The public landing page links to separate **Student** (`/student`) and **Parent** (`/parent`) entry pages. Students can register immediately with their name, registration number, RFID UID, department, year, section, residency, and an existing bus (optional for hostel students). If a campus student record already exists, these details must match before the account can claim it. Parents register with only the child's registration number and the parent mobile number recorded on that student's active record; the parent's account name is not a matching field. Local and `+91` mobile formats are accepted. Parents can link another child from their dashboard using the same two fields. Administrators can also create linked accounts under **Accounts & access**. An administrator account remains in operations.
 
 Both portals display the linked student's class timetable, assigned bus and route, RFID evidence, separate bus/class attendance, camera verification, GPS maps and journey notifications. A bus scan creates a pending face check; it does not mark academic attendance. Campus arrival updates the bus journey only. Faculty starts the separately scheduled class session and reviews its classroom evidence. Portal API queries are limited to linked students. Staff events remain on the operations socket channel; portals receive a data-change signal and reload their scoped view.
 

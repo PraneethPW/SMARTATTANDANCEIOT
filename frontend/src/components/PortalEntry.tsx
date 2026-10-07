@@ -10,7 +10,7 @@ import {
   Users,
 } from "lucide-react";
 
-type Role = "STUDENT" | "PARENT";
+import { roleLabels, roleDescriptions, type Role } from "../roles";
 
 export default function PortalEntry({
   role,
@@ -24,29 +24,56 @@ export default function PortalEntry({
   onNavigate: (path: string) => void;
 }) {
   const parent = role === "PARENT";
-  const title = parent
-    ? "Stay close to every journey."
-    : "Your campus day, connected.";
-  const subtitle = parent
-    ? "See your linked children’s bus journeys, class timetable, and faculty-reviewed attendance in one secure view."
-    : "Follow your bus journey, timetable, and attendance as real campus events reach your account.";
-  const features = [
-    {
-      icon: Fingerprint,
-      title: "Attendance",
-      copy: "View class attendance and bus attendance separately, with faculty decisions and verification status.",
-    },
-    {
-      icon: Radar,
-      title: "Bus journey",
-      copy: "Follow your assigned route, received GPS positions and RFID + face boarding status.",
-    },
-    {
-      icon: CalendarDays,
-      title: "Timetable",
-      copy: "See the classes linked to your department, year, and section.",
-    },
-  ];
+  const staff = ["ADMIN", "FACULTY", "TRANSPORT"].includes(role);
+  const title = staff
+    ? {
+        ADMIN: "Your campus, coordinated.",
+        FACULTY: "Every class, accounted for.",
+        TRANSPORT: "Every journey, connected.",
+      }[role as "ADMIN" | "FACULTY" | "TRANSPORT"]
+    : parent
+      ? "Stay close to every journey."
+      : "Your campus day, connected.";
+  const subtitle = staff
+    ? roleDescriptions[role]
+    : parent
+      ? "See your linked children’s bus journeys, class timetable, and faculty-reviewed attendance in one secure view."
+      : "Follow your bus journey, timetable, and attendance as real campus events reach your account.";
+  const features = staff
+    ? [
+        {
+          icon: ShieldCheck,
+          title: `${roleLabels[role]} controls`,
+          copy: roleDescriptions[role],
+        },
+        {
+          icon: Radar,
+          title: "Connected records",
+          copy: "Attendance and journey updates reach the linked student and parent accounts.",
+        },
+        {
+          icon: Users,
+          title: "Campus access",
+          copy: "Register with an invitation issued by your administrator for your email and role.",
+        },
+      ]
+    : [
+        {
+          icon: Fingerprint,
+          title: "Attendance",
+          copy: "View class attendance and bus attendance separately, with faculty decisions and verification status.",
+        },
+        {
+          icon: Radar,
+          title: "Bus journey",
+          copy: "Follow your assigned route, received GPS positions and RFID + face boarding status.",
+        },
+        {
+          icon: CalendarDays,
+          title: "Timetable",
+          copy: "See the classes linked to your department, year, and section.",
+        },
+      ];
 
   return (
     <main className="landing-shell portal-entry">
@@ -104,23 +131,25 @@ export default function PortalEntry({
         >
           <span className="section-kicker">
             {parent ? <Users size={15} /> : <GraduationCap size={15} />}{" "}
-            {parent ? "FAMILY PORTAL" : "STUDENT PORTAL"}
+            {roleLabels[role].toUpperCase()} PORTAL
           </span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
           <div className="portal-entry-actions">
             <button className="button button-primary" onClick={onSignIn}>
-              Open {parent ? "parent" : "student"} dashboard{" "}
+              Open {roleLabels[role].toLowerCase()} dashboard{" "}
               <ArrowRight size={17} />
             </button>
             <button className="button button-ghost" onClick={onRegister}>
-              Register as {parent ? "parent" : "student"}
+              Register as {roleLabels[role].toLowerCase()}
             </button>
           </div>
           <small>
-            {parent
-              ? "Parent registration matches the contact details already stored for a student."
-              : "Student registration links academic details, residency, RFID card and assigned transport."}
+            {staff
+              ? "Staff registration requires a campus invitation. Forgot password is available on the sign-in and registration forms."
+              : parent
+                ? "Parent registration matches the contact details already stored for a student."
+                : "Student registration links academic details, residency, RFID card and assigned transport."}
           </small>
         </motion.div>
         <motion.div
@@ -145,8 +174,8 @@ export default function PortalEntry({
           </span>
           <h2>One account. A clear view.</h2>
           <p>
-            Each dashboard shows only the students linked to that account, with
-            updates from the same operations system used by campus staff.
+            Your account role determines the controls and records you can
+            access. Updates come from the same connected campus system.
           </p>
         </div>
         <div className="portal-entry-feature-grid">

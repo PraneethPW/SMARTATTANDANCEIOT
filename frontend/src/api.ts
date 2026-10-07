@@ -55,6 +55,10 @@ export async function api<T>(
     },
   });
   const body = (await response.json().catch(() => ({}))) as { error?: string };
+  if (response.status === 401 && token)
+    window.dispatchEvent(
+      new CustomEvent("transitsync:session-expired", { detail: { token } }),
+    );
   if (!response.ok)
     throw new ApiError(
       body.error || `Request failed (${response.status})`,

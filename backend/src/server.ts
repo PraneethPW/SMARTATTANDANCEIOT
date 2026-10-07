@@ -11,6 +11,7 @@ import helmet from "helmet";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { allowRoles, requireAuth, signSession, verifySession } from "./auth.js";
+import { accountsRouter } from "./accounts.js";
 import { synchronizeTripAttendance } from "./attendance.js";
 import {
   transportRouter,
@@ -105,11 +106,11 @@ const asyncRoute =
   (req: Request, res: Response, next: NextFunction) =>
     void handler(req, res, next).catch(next);
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth.token as string | undefined;
   if (!token) return next(new Error("Authentication required"));
   try {
-    socket.data.user = verifySession(token);
+    socket.data.user = await verifySession(token);
     next();
   } catch {
     next(new Error("Invalid session"));
@@ -126,6 +127,7 @@ io.on("connection", (socket) => {
 
 app.use(
   "/api",
+  accountsRouter(io),
   transportRouter(io),
   trackingRouter(),
   verificationRouter(io),
@@ -212,15 +214,6 @@ app.post(
   }),
 );
 
-app.post("/api/auth/signup", (_req, res) => {
-  res
-    .status(403)
-    .json({
-      error:
-        "Faculty and transport accounts are created by a campus administrator",
-    });
-});
-
 app.post(
   "/api/auth/student-signup",
   asyncRoute(async (req, res) => {
@@ -293,24 +286,20 @@ app.post(
         );
         if (occupied.rows[0].n >= bus.rows[0]!.capacity) {
           await client.query("ROLLBACK");
-          return res
-            .status(409)
-            .json({
-              error:
-                "This bus has no remaining seats. Contact the transport office.",
-            });
+          return res.status(409).json({
+            error:
+              "This bus has no remaining seats. Contact the transport office.",
+          });
         }
       }
       if (existing.rows[0]) {
         const student = existing.rows[0];
         if (!matchesStudentClaim(student, input, busId)) {
           await client.query("ROLLBACK");
-          return res
-            .status(409)
-            .json({
-              error:
-                "Registration details do not match the campus record. Contact your administrator.",
-            });
+          return res.status(409).json({
+            error:
+              "Registration details do not match the campus record. Contact your administrator.",
+          });
         }
         const linked = await client.query(
           "SELECT 1 FROM student_user_links WHERE student_id=$1 AND relationship='SELF' LIMIT 1",
@@ -318,12 +307,10 @@ app.post(
         );
         if (linked.rowCount) {
           await client.query("ROLLBACK");
-          return res
-            .status(409)
-            .json({
-              error:
-                "This student already has an account. Sign in or contact your administrator.",
-            });
+          return res.status(409).json({
+            error:
+              "This student already has an account. Sign in or contact your administrator.",
+          });
         }
         if (!student.assigned_bus_id && busId)
           await client.query(
@@ -423,12 +410,10 @@ app.post(
       const student = found.rows[0];
       if (!student || !matchesParentClaim(student, input)) {
         await client.query("ROLLBACK");
-        return res
-          .status(409)
-          .json({
-            error:
-              "Student registration number or parent mobile number does not match an active student record. Contact your administrator.",
-          });
+        return res.status(409).json({
+          error:
+            "Student registration number or parent mobile number does not match an active student record. Contact your administrator.",
+        });
       }
       const passwordHash = await bcrypt.hash(input.password, 12);
       const created = await client.query<{
@@ -474,6 +459,9 @@ app.post(
       .object({
         email: z.string().email().toLowerCase(),
         password: z.string().min(1),
+        role: z
+          .enum(["ADMIN", "FACULTY", "TRANSPORT", "STUDENT", "PARENT"])
+          .optional(),
       })
       .parse(req.body);
     const result = await pool.query<{
@@ -482,8 +470,9 @@ app.post(
       email: string;
       role: "ADMIN" | "FACULTY" | "TRANSPORT" | "PARENT" | "STUDENT";
       password_hash: string;
+      session_version: number;
     }>(
-      "SELECT id, name, email, role, password_hash FROM users WHERE email = $1",
+      "SELECT id, name, email, role, password_hash, session_version FROM users WHERE email = $1",
       [input.email],
     );
     const found = result.rows[0];
@@ -493,13 +482,20 @@ app.post(
     ) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
+    if (input.role && found.role !== input.role) {
+      return res
+        .status(403)
+        .json({
+          error: `This account belongs to the ${found.role.toLowerCase()} portal. Select that role to sign in.`,
+        });
+    }
     const user = {
       id: found.id,
       name: found.name,
       email: found.email,
       role: found.role,
     };
-    res.json({ token: signSession(user), user });
+    res.json({ token: signSession(user, found.session_version), user });
   }),
 );
 
@@ -607,11 +603,9 @@ app.post(
       [userId, registrationNumber],
     );
     if (!result.rowCount)
-      return res
-        .status(404)
-        .json({
-          error: "Parent or active student not found, or link already exists",
-        });
+      return res.status(404).json({
+        error: "Parent or active student not found, or link already exists",
+      });
     io.to("portal").emit("portal:changed");
     res.status(201).json({ studentId: result.rows[0].student_id });
   }),
@@ -637,12 +631,10 @@ app.post(
     );
     const student = found.rows[0];
     if (!student || !matchesParentClaim(student, input)) {
-      return res
-        .status(409)
-        .json({
-          error:
-            "Student registration number or parent mobile number does not match an active student record. Contact your administrator.",
-        });
+      return res.status(409).json({
+        error:
+          "Student registration number or parent mobile number does not match an active student record. Contact your administrator.",
+      });
     }
     const linked = await pool.query(
       `INSERT INTO student_user_links (user_id,student_id,relationship)
@@ -1183,15 +1175,13 @@ app.post(
     io.to("operations").emit("device:event", event);
     if (input.type === "RFID_SCAN" && studentId)
       io.to("portal").emit("portal:changed");
-    res
-      .status(202)
-      .json({
-        accepted: true,
-        duplicate: false,
-        exceptionType,
-        arrival,
-        challenge,
-      });
+    res.status(202).json({
+      accepted: true,
+      duplicate: false,
+      exceptionType,
+      arrival,
+      challenge,
+    });
   }),
 );
 
@@ -1419,12 +1409,10 @@ app.post(
     );
     if (!response.ok) {
       const detail = await response.text();
-      return res
-        .status(502)
-        .json({
-          error: "OpenRouter request failed",
-          detail: detail.slice(0, 500),
-        });
+      return res.status(502).json({
+        error: "OpenRouter request failed",
+        detail: detail.slice(0, 500),
+      });
     }
     const completion = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
@@ -1502,19 +1490,15 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     detail?: string;
   };
   if (typed.code === "23505")
-    return res
-      .status(409)
-      .json({
-        error: "A record with that unique value already exists",
-        detail: typed.detail,
-      });
+    return res.status(409).json({
+      error: "A record with that unique value already exists",
+      detail: typed.detail,
+    });
   if (typed.code === "23503")
-    return res
-      .status(400)
-      .json({
-        error: "A referenced record does not exist",
-        detail: typed.detail,
-      });
+    return res.status(400).json({
+      error: "A referenced record does not exist",
+      detail: typed.detail,
+    });
   console.error(error);
   res
     .status(typed.status ?? 500)
