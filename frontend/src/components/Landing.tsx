@@ -227,8 +227,6 @@ export default function Landing({
         </a>
         <div className="nav-links">
           <a href="#system">Live chain</a>
-          <a href="/student">Students</a>
-          <a href="/parent">Parents</a>
           <a href="#trust">Trust</a>
         </div>
         <div className="landing-account-actions">
