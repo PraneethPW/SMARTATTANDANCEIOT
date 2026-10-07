@@ -4,7 +4,7 @@ import { Router } from "express";
 import type { Server } from "socket.io";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { allowRoles, requireAuth } from "./auth.js";
+import { allowRoles, requireAuth, signSession } from "./auth.js";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { audit, fail, route, transaction } from "./http.js";
@@ -75,145 +75,25 @@ export function accountsRouter(io: Server) {
           role: req.path === "/auth/admin-signup" ? "ADMIN" : req.body?.role,
         });
       const passwordHash = await bcrypt.hash(input.password, 12);
-      await transaction(async (c) => {
-        if (
-          !(await c.query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1"))
-            .rowCount
-        )
-          fail(
-            409,
-            "The workspace needs its first administrator. Open initial workspace setup.",
-          );
-        if (
-          (await c.query("SELECT id FROM users WHERE email=$1", [input.email]))
-            .rowCount
-        )
-          fail(
-            409,
-            "This email already has an account. Sign in or use password recovery.",
-          );
-        const registered = await c.query(
-          "INSERT INTO admin_registration_requests(name,email,password_hash,role) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,role=EXCLUDED.role,status='PENDING',requested_at=now(),handled_at=NULL,handled_by=NULL,user_id=NULL WHERE admin_registration_requests.status='DECLINED' RETURNING id",
+      const user = await transaction(async (c) => {
+        const created = await c.query(
+          "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO NOTHING RETURNING id,name,email,role",
           [input.name, input.email, passwordHash, input.role],
         );
-        if (!registered.rowCount)
+        if (!created.rowCount)
           fail(
             409,
-            "A registration request for this email is already awaiting approval.",
+            "This email already has an account. Sign in through its registered role or use password recovery. Use a different email for a new account.",
           );
-      });
-      io.to("operations").emit("admin-registration:changed");
-      io.to("operations").emit("registration:changed");
-      res.status(202).json({
-        pendingApproval: true,
-        message: `Your ${input.role === "ADMIN" ? "Admin" : input.role === "FACULTY" ? "Faculty" : "Transport"} registration was submitted. A campus administrator must verify and approve your access. You can sign in with this email and password after approval.`,
-      });
-    }),
-  );
-  r.get(
-    ["/access/registrations", "/access/admin-registrations"],
-    route(async (req, res) =>
-      res.json({
-        registrations: (
-          await pool.query(
-            "SELECT id,name,email,role,status,requested_at,handled_at FROM admin_registration_requests WHERE status='PENDING' AND ($1=false OR role='ADMIN') ORDER BY requested_at DESC LIMIT 100",
-            [req.path === "/access/admin-registrations"],
-          )
-        ).rows,
-      }),
-    ),
-  );
-  r.post(
-    [
-      "/access/registrations/:id/approve",
-      "/access/admin-registrations/:id/approve",
-    ],
-    route(async (req, res) => {
-      const id = z.string().uuid().parse(req.params.id);
-      z.object({ identityConfirmed: z.literal(true) }).parse(req.body);
-      const user = await transaction(async (c) => {
-        const request = (
-          await c.query(
-            "SELECT * FROM admin_registration_requests WHERE id=$1 AND status='PENDING' AND ($2=false OR role='ADMIN') FOR UPDATE",
-            [id, req.path.startsWith("/access/admin-registrations/")],
-          )
-        ).rows[0];
-        if (!request)
-          fail(
-            409,
-            "This registration request has already been handled or is unavailable.",
-          );
-        if (
-          (
-            await c.query("SELECT id FROM users WHERE email=$1", [
-              request.email,
-            ])
-          ).rowCount
-        )
-          fail(
-            409,
-            "An account already exists for this email. Decline this request and manage the existing account.",
-          );
-        const created = (
-          await c.query(
-            "INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,name,email,role",
-            [request.name, request.email, request.password_hash, request.role],
-          )
-        ).rows[0];
-        await c.query(
-          "UPDATE admin_registration_requests SET status='APPROVED',password_hash=NULL,handled_by=$2,handled_at=now(),user_id=$3 WHERE id=$1",
-          [id, req.user!.id, created.id],
-        );
-        await audit(
-          c,
-          req.user!.id,
-          "APPROVE_STAFF_REGISTRATION",
-          "user",
-          created.id,
-          null,
-          { identityConfirmed: true, registrationId: id, role: created.role },
-        );
-        return created;
+        const user = created.rows[0];
+        await audit(c, user.id, "SELF_REGISTER_STAFF", "user", user.id, null, {
+          role: user.role,
+          activation: "automatic",
+        });
+        return user;
       });
       io.to("operations").emit("user:created", { role: user.role });
-      io.to("operations").emit("registration:changed");
-      res.status(201).json({ approved: true, user });
-    }),
-  );
-  r.post(
-    [
-      "/access/registrations/:id/decline",
-      "/access/admin-registrations/:id/decline",
-    ],
-    route(async (req, res) => {
-      const id = z.string().uuid().parse(req.params.id);
-      await transaction(async (c) => {
-        const updated = await c.query(
-          "UPDATE admin_registration_requests SET status='DECLINED',password_hash=NULL,handled_by=$2,handled_at=now() WHERE id=$1 AND status='PENDING' AND ($3=false OR role='ADMIN') RETURNING id,role",
-          [
-            id,
-            req.user!.id,
-            req.path.startsWith("/access/admin-registrations/"),
-          ],
-        );
-        if (!updated.rowCount)
-          fail(
-            409,
-            "This registration request has already been handled or is unavailable.",
-          );
-        await audit(
-          c,
-          req.user!.id,
-          "DECLINE_STAFF_REGISTRATION",
-          "staff_registration",
-          id,
-          null,
-          { role: updated.rows[0].role },
-        );
-      });
-      io.to("operations").emit("admin-registration:changed");
-      io.to("operations").emit("registration:changed");
-      res.json({ declined: true });
+      res.status(201).json({ user, token: signSession(user) });
     }),
   );
   r.post(

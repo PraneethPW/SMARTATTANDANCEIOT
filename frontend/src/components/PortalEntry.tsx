@@ -54,7 +54,7 @@ export default function PortalEntry({
         {
           icon: Users,
           title: "Campus access",
-          copy: "Register with your name, email and password. A campus Admin verifies and approves your role access.",
+          copy: "Register with your name, email and password. Your account activates immediately with this role’s controls.",
         },
       ]
     : [
@@ -146,7 +146,7 @@ export default function PortalEntry({
           </div>
           <small>
             {staff
-              ? "Register without a code. A campus Admin approves staff access. Forgot password is available on the sign-in and registration forms."
+              ? "Register and open your dashboard immediately. No code or approval is needed. Forgot password is available on the sign-in and registration forms."
               : parent
                 ? "Parent registration matches the contact details already stored for a student."
                 : "Student registration links academic details, residency, RFID card and assigned transport."}

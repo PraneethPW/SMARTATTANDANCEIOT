@@ -121,14 +121,8 @@ try {
     ])
   ).rows[0];
   assert.equal(migrated.role, "ADMIN");
-  assert.equal(migrated.password_hash, legacyRequest.password_hash);
-  await call(
-    "/api/access/admin-registrations/" + legacyRequest.id + "/approve",
-    "POST",
-    { identityConfirmed: true },
-    admin.token,
-    201,
-  );
+  assert.equal(migrated.password_hash, null);
+  assert.equal(migrated.status, "APPROVED");
   assert.equal(
     (
       await call("/api/auth/login", "POST", {
@@ -140,21 +134,34 @@ try {
     "ADMIN",
   );
   check(
-    "Existing Admin requests survive repeat migrations; initial Admin setup closes after bootstrap",
+    "Pending Admin accounts activate during repeat-safe migration; initial setup closes after bootstrap",
   );
-  // Registration must not expose an active staff session before approval.
   for (const role of ["FACULTY", "TRANSPORT", "ADMIN"]) {
     const email = role.toLowerCase() + "2@example.org";
     const signup = { name: "Test " + role, email, role, password };
-    const pending = await call(
+    const registered = await call(
       "/api/auth/staff-signup",
       "POST",
       signup,
       undefined,
-      202,
+      201,
     );
-    assert.equal(pending.pendingApproval, true);
-    assert.ok(!("token" in pending) && !("user" in pending));
+    assert.equal(registered.user.role, role);
+    assert.ok(
+      registered.token &&
+        !("pendingApproval" in registered) &&
+        !("password_hash" in registered.user),
+    );
+    assert.equal(
+      (await call("/api/auth/me", "GET", undefined, registered.token)).user
+        .role,
+      role,
+    );
+    assert.equal(
+      (await call("/api/auth/login", "POST", { email, password, role })).user
+        .role,
+      role,
+    );
     await call(
       "/api/auth/staff-signup",
       "POST",
@@ -165,74 +172,79 @@ try {
     assert.equal(
       (
         await pool.query(
-          "SELECT count(*)::int AS n FROM users WHERE email=$1",
+          "SELECT count(*)::int AS n FROM admin_registration_requests WHERE email=$1",
           [email],
         )
       ).rows[0].n,
       0,
     );
-    await call(
-      "/api/auth/login",
-      "POST",
-      { email, password, role },
-      undefined,
-      401,
-    );
-    const requests = await call(
-      "/api/access/registrations",
-      "GET",
-      undefined,
-      admin.token,
-    );
-    assert.equal(requests.registrations.length, 1);
-    const request = requests.registrations[0];
-    assert.equal(request.role, role);
-    assert.ok(!("password_hash" in request));
-    await call(
-      "/api/access/registrations/" + request.id + "/approve",
-      "POST",
-      { identityConfirmed: false },
-      admin.token,
-      400,
-    );
-    const approved = await call(
-      "/api/access/registrations/" + request.id + "/approve",
-      "POST",
-      { identityConfirmed: true, role: "ADMIN" },
-      admin.token,
-      201,
-    );
-    assert.equal(
-      approved.user.role,
-      role,
-      "Approval must use the stored requested role",
-    );
-    await call(
-      "/api/access/registrations/" + request.id + "/approve",
-      "POST",
-      { identityConfirmed: true },
-      admin.token,
-      409,
-    );
-    const registered = await call("/api/auth/login", "POST", {
-      email,
-      password,
-      role,
-    });
-    assert.equal(registered.user.role, role);
-    await call("/api/auth/staff-signup", "POST", signup, undefined, 409);
-    assert.equal(
-      (
-        await pool.query(
-          "SELECT password_hash FROM admin_registration_requests WHERE id=$1",
-          [request.id],
-        )
-      ).rows[0].password_hash,
-      null,
-    );
     if (role !== "ADMIN") accounts[role] = registered;
     else accounts.secondAdmin = registered;
   }
+  const transportBefore = (
+    await pool.query("SELECT password_hash FROM users WHERE id=$1", [
+      accounts.TRANSPORT.user.id,
+    ])
+  ).rows[0].password_hash;
+  await pool.query(
+    "INSERT INTO admin_registration_requests(name,email,password_hash,role) SELECT 'Pending Faculty','pending.faculty@example.org',password_hash,'FACULTY' FROM users WHERE id=$1",
+    [admin.user.id],
+  );
+  await pool.query(
+    "INSERT INTO admin_registration_requests(name,email,password_hash,role) SELECT 'Pending Transport','pending.transport@example.org',password_hash,'TRANSPORT' FROM users WHERE id=$1",
+    [admin.user.id],
+  );
+  await pool.query(
+    "INSERT INTO admin_registration_requests(name,email,password_hash,role) SELECT 'Conflicting Admin',email,password_hash,'ADMIN' FROM users WHERE id=$1",
+    [accounts.TRANSPORT.user.id],
+  );
+  await pool.query(accountMigration);
+  const auditCount = (
+    await pool.query(
+      "SELECT count(*)::int AS n FROM audit_logs WHERE action LIKE 'AUTO_%REGISTRATION'",
+    )
+  ).rows[0].n;
+  await pool.query(accountMigration);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action LIKE 'AUTO_%REGISTRATION'",
+      )
+    ).rows[0].n,
+    auditCount,
+  );
+  for (const role of ["FACULTY", "TRANSPORT"]) {
+    const email = "pending." + role.toLowerCase() + "@example.org";
+    assert.equal(
+      (await call("/api/auth/login", "POST", { email, password, role })).user
+        .role,
+      role,
+    );
+    const request = (
+      await pool.query(
+        "SELECT status,password_hash FROM admin_registration_requests WHERE email=$1",
+        [email],
+      )
+    ).rows[0];
+    assert.equal(request.status, "APPROVED");
+    assert.equal(request.password_hash, null);
+  }
+  const transportAfter = (
+    await pool.query("SELECT role,password_hash FROM users WHERE id=$1", [
+      accounts.TRANSPORT.user.id,
+    ])
+  ).rows[0];
+  assert.equal(transportAfter.role, "TRANSPORT");
+  assert.equal(transportAfter.password_hash, transportBefore);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT status FROM admin_registration_requests WHERE email=$1",
+        [accounts.TRANSPORT.user.email],
+      )
+    ).rows[0].status,
+    "DECLINED",
+  );
   await call(
     "/api/auth/staff-signup",
     "POST",
@@ -246,7 +258,7 @@ try {
     400,
   );
   check(
-    "Code-free Admin, Faculty and Transport registration requires verified Admin approval; roles, duplicate requests and single approval are enforced",
+    "Admin, Faculty and Transport activate immediately; pending staff migration preserves existing roles/passwords and creates no duplicate audits",
   );
   accounts.STUDENT = await call(
     "/api/auth/student-signup",
@@ -265,6 +277,30 @@ try {
     },
     undefined,
     201,
+  );
+  for (const claim of [
+    { registrationNumber: "WRONG-S001", parentContact: "9999900001" },
+    { registrationNumber: "AUTH-S001", parentContact: "9999900002" },
+  ])
+    await call(
+      "/api/auth/parent-signup",
+      "POST",
+      {
+        name: "Unmatched Parent",
+        email: "unmatched.parent@example.org",
+        password,
+        ...claim,
+      },
+      undefined,
+      409,
+    );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM users WHERE email='unmatched.parent@example.org'",
+      )
+    ).rows[0].n,
+    0,
   );
   accounts.PARENT = await call(
     "/api/auth/parent-signup",
@@ -292,84 +328,6 @@ try {
     accounts.PARENT.token,
   );
   assert.equal(studentPortal.students[0].id, parentPortal.students[0].id);
-  for (const requestedRole of ["ADMIN", "FACULTY", "TRANSPORT"]) {
-    const path =
-      requestedRole === "ADMIN" ? "/api/auth/admin-signup" : "/api/auth/signup";
-    const applicant = {
-      name: "Declined Test " + requestedRole,
-      email: "declined." + requestedRole.toLowerCase() + "@example.org",
-      password,
-      role: requestedRole,
-    };
-    await call(path, "POST", applicant, undefined, 202);
-    const request = (
-      await call("/api/access/registrations", "GET", undefined, admin.token)
-    ).registrations[0];
-    assert.equal(request.role, requestedRole);
-    // Old Admin-only lists must not show Faculty/Transport requests.
-    const legacy = await call(
-      "/api/access/admin-registrations",
-      "GET",
-      undefined,
-      admin.token,
-    );
-    assert.equal(
-      legacy.registrations.length,
-      requestedRole === "ADMIN" ? 1 : 0,
-    );
-    for (const role of ["FACULTY", "TRANSPORT", "STUDENT", "PARENT"]) {
-      await call(
-        "/api/access/registrations",
-        "GET",
-        undefined,
-        accounts[role].token,
-        403,
-      );
-      await call(
-        "/api/access/registrations/" + request.id + "/approve",
-        "POST",
-        { identityConfirmed: true },
-        accounts[role].token,
-        403,
-      );
-      await call(
-        "/api/access/registrations/" + request.id + "/decline",
-        "POST",
-        undefined,
-        accounts[role].token,
-        403,
-      );
-    }
-    await call(
-      "/api/access/registrations/" + request.id + "/decline",
-      "POST",
-      undefined,
-      admin.token,
-    );
-    await call(
-      "/api/auth/login",
-      "POST",
-      { email: applicant.email, password, role: requestedRole },
-      undefined,
-      401,
-    );
-    assert.equal(
-      (
-        await pool.query(
-          "SELECT password_hash FROM admin_registration_requests WHERE id=$1",
-          [request.id],
-        )
-      ).rows[0].password_hash,
-      null,
-    );
-    await call(path, "POST", applicant, undefined, 202);
-    await call(
-      "/api/access/registrations/" + request.id + "/decline",
-      "POST",
-      undefined,
-      admin.token,
-    );
-  }
   // All signup aliases share the same request limit.
   for (let n = 0; n < 5; n++)
     await call(
@@ -382,7 +340,7 @@ try {
         password,
       },
       undefined,
-      202,
+      201,
       "198.51.100.43",
     );
   await call(
@@ -399,7 +357,7 @@ try {
     "198.51.100.43",
   );
   check(
-    "All staff queues reject non-Admins; declines remove credentials, permit reapplication, and shared signup limits apply",
+    "Student and Parent activate immediately with verified child linking; mismatched claims fail and staff signup aliases share request limits",
   );
   for (const role of ["FACULTY", "TRANSPORT", "STUDENT", "PARENT"]) {
     const account = accounts[role];
@@ -643,17 +601,6 @@ try {
   );
   console.log("Verified " + passed.length + " account integration groups.");
   if (process.argv.includes("--keep")) {
-    await call(
-      "/api/auth/admin-signup",
-      "POST",
-      {
-        name: "Test Admin Applicant",
-        email: "pending.admin@example.org",
-        password,
-      },
-      undefined,
-      202,
-    );
     await writeFile(
       new URL("../../../accounts-ui-session.json", import.meta.url),
       JSON.stringify(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
+import { Copy, KeyRound, RefreshCw } from "lucide-react";
 import { api } from "../api";
 import {
   dashboardPaths,
@@ -17,13 +17,6 @@ type Recovery = {
   requested_at: string;
 };
 type Account = { id: string; name: string; email: string; role: Role };
-type StaffRegistration = {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  requested_at: string;
-};
 export default function AccessManagement({
   token,
   refreshKey,
@@ -33,7 +26,6 @@ export default function AccessManagement({
 }) {
   const [requests, setRequests] = useState<Recovery[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [registrations, setRegistrations] = useState<StaffRegistration[]>([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,19 +45,13 @@ export default function AccessManagement({
   }, [secret]);
   const load = useCallback(async () => {
     try {
-      const [recovery, status, users, registrations] = await Promise.all([
+      const [recovery, status, users] = await Promise.all([
         api<{ requests: Recovery[] }>("/api/access/recovery", {}, token),
         api<{ emailConfigured: boolean }>("/api/access/status", {}, token),
         api<{ users: Account[] }>("/api/users", {}, token),
-        api<{ registrations: StaffRegistration[] }>(
-          "/api/access/registrations",
-          {},
-          token,
-        ),
       ]);
       setRequests(recovery.requests);
       setAccounts(users.users);
-      setRegistrations(registrations.registrations);
       setEmailConfigured(status.emailConfigured);
       setError("");
     } catch (cause) {
@@ -102,8 +88,9 @@ export default function AccessManagement({
           <span className="section-kicker">ACCOUNT ACCESS</span>
           <h2>One campus. Five roles.</h2>
           <p>
-            Approve staff registrations and help account holders recover access
-            after verifying their identity.
+            Registrations activate automatically for all five roles. Parents
+            must match their child’s campus record. Help existing account
+            holders recover access after verifying their identity.
           </p>
         </div>
         <button
@@ -177,89 +164,6 @@ export default function AccessManagement({
           </div>
         </section>
       )}
-      <section className="dash-card">
-        <div className="card-head">
-          <div>
-            <h3>Staff registrations</h3>
-            <span>
-              Applicants register with name, email and password. Approve campus
-              Admin, Faculty or Transport access after verification.
-            </span>
-          </div>
-          <ShieldCheck size={20} />
-        </div>
-        <div className="portal-list">
-          {registrations.map((request) => (
-            <div className="access-recovery-row" key={request.id}>
-              <div>
-                <strong>
-                  {request.name} · {roleLabels[request.role]}
-                </strong>
-                <small>{request.email}</small>
-                <small>
-                  Requested {new Date(request.requested_at).toLocaleString()}
-                </small>
-              </div>
-              <label className="access-confirm">
-                <input
-                  type="checkbox"
-                  checked={Boolean(confirmed[request.id])}
-                  disabled={busy}
-                  onChange={(e) =>
-                    setConfirmed((old) => ({
-                      ...old,
-                      [request.id]: e.target.checked,
-                    }))
-                  }
-                />{" "}
-                I verified this applicant for {roleLabels[request.role]} access
-              </label>
-              <button
-                className="button button-primary button-compact"
-                disabled={busy || !confirmed[request.id]}
-                onClick={() =>
-                  void run(async () => {
-                    await api(
-                      `/api/access/registrations/${request.id}/approve`,
-                      {
-                        method: "POST",
-                        body: JSON.stringify({ identityConfirmed: true }),
-                      },
-                      token,
-                    );
-                    setConfirmed((old) => ({ ...old, [request.id]: false }));
-                  })
-                }
-              >
-                Approve {roleLabels[request.role]}
-              </button>
-              <button
-                className="button button-ghost button-compact"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await api(
-                      `/api/access/registrations/${request.id}/decline`,
-                      { method: "POST" },
-                      token,
-                    );
-                    setConfirmed((old) => ({ ...old, [request.id]: false }));
-                  })
-                }
-              >
-                Decline
-              </button>
-            </div>
-          ))}
-          {!registrations.length && (
-            <div className="portal-empty">
-              {loading
-                ? "Loading staff requests…"
-                : "No pending staff registrations."}
-            </div>
-          )}
-        </div>
-      </section>
       <section className="dash-card">
         <div className="card-head">
           <div>

@@ -4,7 +4,7 @@ Open **Open control center** on the landing page and choose Admin, Transport, Fa
 
 | Role      | Entry/dashboard | Controls                                                                                                                           |
 | --------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Admin     | `/admin`        | Campus overview, accounts and staff approvals, password recovery, student links, buses, timetables, attendance and reports         |
+| Admin     | `/admin`        | Campus overview, accounts and password recovery, password recovery, student links, buses, timetables, attendance and reports       |
 | Transport | `/transport`    | Fleet, buses, drivers, routes, stops, allocations, journeys, bus attendance and verification                                       |
 | Faculty   | `/faculty`      | Assigned classes, academic attendance and verification, boarding information and reports; no account administration or bus editing |
 | Student   | `/student`      | Own linked profile, timetable, journey, bus/class attendance and notifications                                                     |
@@ -12,17 +12,19 @@ Open **Open control center** on the landing page and choose Admin, Transport, Fa
 
 Existing `/app` links redirect to the account's role dashboard. Back, Home and Sign out remain available. Existing campus design, animation and scroll effects are retained.
 
-## Registering Admin, Faculty and Transport without a code
+## Automatic registration for all roles
 
-1. Choose **Admin**, **Faculty** or **Transport**, then **Register**. Enter name, email and a password of at least 10 characters. No registration portal asks for an invitation code.
-2. Submit the registration. The application confirms it is awaiting campus approval; no active staff account or session is created yet.
-3. An existing Admin opens **Accounts & access → Staff registrations**. The queue shows each applicant's name, email and requested role and updates when requests arrive.
-4. Verify the applicant's identity and authorization for the displayed role. Check **I verified this applicant for [role] access**, then choose **Approve [role]**. Only an Admin can approve or decline requests.
-5. The approved person signs in with the registration email and password and receives their role's dashboard. Declined applicants receive no account access and may reapply. Duplicate requests and already handled approvals are rejected.
+Every successful registration activates immediately and opens that role's dashboard. There are no invitation codes, approval queues or manual account approvals.
 
-The first Admin still uses initial workspace setup. Existing accounts continue signing in normally. Existing pending Admin requests are preserved as Admin requests. Approved or declined requests have their temporary password hash removed. Invitation creation and code-based signup have been retired; recipients of old codes should register through the new approval flow.
+- **Admin, Faculty, Transport:** register with name, a unique email and a password of at least 10 characters. The chosen role determines the available controls.
+- **Student:** register with academic, RFID and bus details. Existing student records still require matching identity/class details; new valid registrations become active immediately.
+- **Parent:** register with the student's registration number and the parent mobile already stored on that student's record. Both must match. A matching parent is linked to that student and can immediately view the child's dashboard data. The parent's name is only their own display name.
 
-Student registration activates immediately using the existing academic/RFID/bus checks. Parent registration continues matching only the student's registration number and recorded parent mobile number. Administrators can also create accounts and link children using the existing campus tools.
+An email identifies one account and one role. Selecting a different role at login does not change an existing account. In particular, an email registered for Transport must sign in as Transport; a new Admin account needs another email.
+
+The first Admin can still use initial workspace setup. Previously pending staff registrations are automatically activated at deployment using their submitted password and requested role. Duplicate requests for an already registered email are closed without changing the existing account's role or password. Declined requests stay declined; people can register again through the automatic flow.
+
+**Deployment access policy:** Admin self-registration is public and immediately grants full campus controls. This is the user-requested automatic activation policy; it does not verify that a visitor is campus staff.
 
 ## Administrator-assisted recovery (current production mode)
 
@@ -37,7 +39,7 @@ There is no production reset email service configured. The UI explains that reco
 
 The token is in the URL fragment, rather than its query string, and is stored as a SHA-256 hash. Passwords remain bcrypt hashes; reset tokens are excluded from audit records and ordinary lists.
 
-**Admin recovery:** another Admin must verify and assist a locked-out Admin. Maintain at least two trusted Admin accounts for this workflow. If all Admins lose access, this mode requires assistance from the deployment/database owner; it cannot generate its own approval.
+**Admin recovery:** any signed-in Admin can verify and assist a locked-out Admin. Registering a new account does not change an existing account's password or role. A new Admin registration must use a separate email.
 
 ## Configuration
 
@@ -47,4 +49,4 @@ Future optional email recovery requires both `RESEND_API_KEY` and `AUTH_EMAIL_FR
 
 ## Verification
 
-Run `pnpm build`, `pnpm test`, and, with database environment variables available, `node backend/scripts/verify-accounts.mjs` from the repository root. The integration script uses a disposable schema and deletes it after the test; production application records are not modified. It checks code-free registration and approval for all three staff roles, all five roles, linked child data, generic recovery responses, identity confirmation, one-time/expired reset links, session revocation and request limits.
+Run `pnpm build`, `pnpm test`, and, with database environment variables available, `node backend/scripts/verify-accounts.mjs` from the repository root. The integration script uses a disposable schema and deletes it after the test; production application records are not modified. It checks automatic registration for all three staff roles and pending-request migration, all five roles, linked child data, generic recovery responses, identity confirmation, one-time/expired reset links, session revocation and request limits.

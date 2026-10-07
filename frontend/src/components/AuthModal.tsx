@@ -96,6 +96,7 @@ export default function AuthModal({
     event.preventDefault();
     setBusy(true);
     setError("");
+    setMessage("");
     const data = new FormData(event.currentTarget);
     const payload = {
       name: String(data.get("name") || ""),
@@ -113,25 +114,6 @@ export default function AuthModal({
       parentContact: String(data.get("parentContact") || ""),
     };
     try {
-      if (mode === "signup" && staff) {
-        const response = await api<{ message: string }>(
-          portalRole === "ADMIN"
-            ? "/api/auth/admin-signup"
-            : "/api/auth/staff-signup",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              name: payload.name,
-              email: payload.email,
-              password: payload.password,
-              role: portalRole,
-            }),
-          },
-        );
-        setMode("login");
-        setMessage(response.message);
-        return;
-      }
       if (mode === "forgot") {
         const response = await api<{ message: string }>(
           "/api/auth/forgot-password",
@@ -291,10 +273,10 @@ export default function AuthModal({
                               ? "Enter your academic and bus details. A new registration becomes active immediately; an existing record must match its RFID card and class."
                               : portalRole === "PARENT"
                                 ? "Your child’s registration number and the parent mobile number on their record must match. Your name is used only for your account."
-                                : "Register with your name, email and password. A campus administrator will verify and approve your role access."
+                                : "Register with your name, email and password. Your account activates immediately and opens your role’s dashboard."
                             : portalRole
                               ? roleDescriptions[portalRole]
-                              : "Sign in with your institutional account. Faculty and transport accounts are created by a campus administrator."}
+                              : "Sign in with your registered account and choose its role."}
                 </p>
               </div>
               {!entryRole && ["login", "signup", "forgot"].includes(mode) && (
@@ -559,7 +541,7 @@ export default function AuthModal({
                           ? "Create secure workspace"
                           : mode === "signup"
                             ? staff
-                              ? `Submit ${roleLabels[portalRole]} registration`
+                              ? `Register & open ${portalRole.toLowerCase()} dashboard`
                               : portalRole
                                 ? `Register & open ${portalRole.toLowerCase()} dashboard`
                                 : "Create account & continue"
